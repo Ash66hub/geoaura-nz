@@ -1,26 +1,32 @@
-import { Component, OnInit, ElementRef, ViewChild } from '@angular/core';
+import { Component, OnInit, ElementRef, viewChild } from '@angular/core';
 import * as maplibregl from 'maplibre-gl';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-map-explorer',
   standalone: true,
   template: `<div #mapContainer class="map-container"></div>`,
-  styles: [`
-    .map-container {
-      width: 100%;
-      height: 100vh; /* This ensures the map fills the screen */
-    }
-  `]
+  styles: [
+    `
+      .map-container {
+        width: 100%;
+        height: 100vh;
+      }
+    `,
+  ],
 })
 export class MapExplorerComponent implements OnInit {
-  @ViewChild('mapContainer', { static: true }) mapContainer!: ElementRef;
+  private mapContainer = viewChild<ElementRef>('mapContainer');
 
   ngOnInit() {
+    const container = this.mapContainer()?.nativeElement;
+    if (!container) return;
+
     const map = new maplibregl.Map({
-      container: this.mapContainer.nativeElement,
-      style: 'https://demotiles.maplibre.org/style.json', // Free default style
-      center: [175.279, -37.787], // Hamilton, NZ Coordinates
-      zoom: 12
+      container,
+      style: `https://basemaps.linz.govt.nz/v1/styles/topographic-v2.json?api=${environment.linzApiKey}&tileMatrix=WebMercatorQuad`,
+      center: [174.7633, -36.8485],
+      zoom: 16,
     });
 
     map.addControl(new maplibregl.NavigationControl());
