@@ -12,7 +12,8 @@ COUNCIL_FLOOD_ENDPOINTS: dict[str, dict] = {
     },
     "Greater Wellington Regional Council": {
         "name": "Greater Wellington Regional Council",
-        "feature_service": "https://services1.arcgis.com/3JjYDyG3oajxU6HO/arcgis/rest/services/Wellington_Region_Flood_Hazard_Areas/FeatureServer/0",
+        "feature_service": "https://maps.gw.govt.nz/portal/rest/services/Hazards/Flood_Hazard_Extents/MapServer/3",
+        "geojson_url": "https://maps.gw.govt.nz/portal/rest/services/Hazards/Flood_Hazard_Extents/MapServer/3/query?where=1%3D1&outFields=*&f=geojson&outSR=4326&resultRecordCount=2000"
     },
     "Environment Canterbury": {
         "name": "Environment Canterbury",
@@ -79,6 +80,22 @@ class FloodService:
                 },
             },
         }
+
+    def get_query_url_with_bbox(self, base_url: str, bbox: list[float], limit: int = 1000) -> str:
+        # ArcGIS bbox format: xmin, ymin, xmax, ymax
+        # GeoJSON is normally [lng_min, lat_min, lng_max, lat_max]
+        bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+        return (
+            f"{base_url}/query?"
+            f"where=1%3D1&"
+            f"geometry={bbox_str}&"
+            f"geometryType=esriGeometryEnvelope&"
+            f"spatialRel=esriSpatialRelIntersects&"
+            f"outFields=*&"
+            f"f=geojson&"
+            f"resultRecordCount={limit}&"
+            f"outSR=4326"
+        )
 
     def get_regional_layer_info(self, council_name: str) -> Optional[dict]:
         match = None

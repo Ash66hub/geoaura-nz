@@ -19,4 +19,10 @@ export class FloodService {
       params: { council }
     });
   }
+
+  getFloodInfoForExtent(minLng: number, minLat: number, maxLng: number, maxLat: number): Observable<any> {
+    return this.http.get(`${this.baseUrl}/extent`, {
+      params: { min_lng: minLng, min_lat: minLat, max_lng: maxLng, max_lat: maxLat }
+    });
+  }
 }

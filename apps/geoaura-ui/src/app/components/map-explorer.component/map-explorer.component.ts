@@ -38,8 +38,29 @@ export class MapExplorerComponent implements OnInit {
     { id: 'police', name: 'Police Incidents', icon: 'local_police', active: false, colorClass: 'primary', iconColorClass: 'text-slate-500' }
   ]);
 
+  currentMapMode = signal<'satellite' | 'topo'>('satellite');
+  private topoLayers: string[] = [];
   private map?: maplibregl.Map;
   private floodLayersAdded = false;
+
+  toggleMapMode(mode: 'satellite' | 'topo') {
+    this.currentMapMode.set(mode);
+    if (!this.map) return;
+
+    const isSatellite = mode === 'satellite';
+    const visibility = isSatellite ? 'visible' : 'none';
+    const topoVisibility = isSatellite ? 'none' : 'visible';
+
+    if (this.map.getLayer('nz-aerial-layer')) {
+      this.map.setLayoutProperty('nz-aerial-layer', 'visibility', visibility);
+    }
+
+    this.topoLayers.forEach(layerId => {
+      if (this.map?.getLayer(layerId)) {
+        this.map.setLayoutProperty(layerId, 'visibility', topoVisibility);
+      }
+    });
+  }
 
   toggleLayer(id: string) {
     this.layers.update(currentLayers => 
@@ -62,15 +83,22 @@ export class MapExplorerComponent implements OnInit {
     const active = this.isLayerActive('flood');
 
     if (active && !this.floodLayersAdded) {
-      this.initNationalLayers(this.map);
+      this.initFloodLayers(this.map);
       this.floodLayersAdded = true;
-      // Also check if we should load regional immediately
       this.checkRegionalFlood(this.map);
       return;
     }
 
     const visibility = active ? 'visible' : 'none';
-    const layers = ['flood-rivers-layer', 'flood-gauges-layer', 'flood-plains-layer', 'flood-regional-fill', 'flood-regional-raster'];
+    const layers = [
+      'flood-rivers-layer', 
+      'flood-gauges-layer', 
+      'flood-gauges-cluster',
+      'flood-gauges-count',
+      'flood-plains-layer', 
+      'flood-regional-fill', 
+      'flood-regional-raster'
+    ];
     
     layers.forEach(layerId => {
       if (this.map?.getLayer(layerId)) {
@@ -95,49 +123,170 @@ export class MapExplorerComponent implements OnInit {
     map.addControl(new maplibregl.NavigationControl());
 
     map.on('load', () => {
+      this.initBasemapLayers(map);
       this.initRegionalWatch(map);
       // We don't call initNationalLayers here anymore, updateFloodVisibility handles it
     });
   }
 
-  private initNationalLayers(map: maplibregl.Map) {
-    this.floodService.getNationalLayerInfo().subscribe({
-      next: (info: any) => {
-        try {
-          console.log('[Flood-API-Response]', info);
-          const currentActive = this.layers().find(l => l.id === 'flood')?.active ?? false;
-          const layers = info.layers;
+  private initBasemapLayers(map: maplibregl.Map) {
+    const style = map.getStyle();
+    
+    // 1. NZ Aerial Imagery (LINZ)
+    map.addSource('nz-aerial', {
+      type: 'raster',
+      tiles: [
+        `https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api=${environment.linzApiKey}`
+      ],
+      tileSize: 256,
+      attribution: '&copy; <a href="https://www.linz.govt.nz/">LINZ</a>'
+    });
 
-          if (layers?.flood_plains?.geojson_url) {
-            this.addFloodPlainsLayer(map, layers.flood_plains.geojson_url, currentActive);
-          }
+    // Layer injection: Put it at the very bottom
+    map.addLayer({
+      id: 'nz-aerial-layer',
+      type: 'raster',
+      source: 'nz-aerial',
+      layout: { 'visibility': this.currentMapMode() === 'satellite' ? 'visible' : 'none' },
+      paint: { 'raster-opacity': 1 }
+    }, style.layers?.[0]?.id);
 
-          if (layers?.river_network?.geojson_url) {
-            this.addRiverNetworkLayer(map, layers.river_network.geojson_url, currentActive);
-          }
+    // 2. Identify "Opaque" topo layers for toggling
+    this.topoLayers = [];
+    style.layers?.forEach(layer => {
+      const id = layer.id.toLowerCase();
+      const sl = ((layer as any)['source-layer'] || '').toLowerCase();
 
-          if (layers?.flow_gauges?.geojson_url) {
-            this.addFlowGaugesLayer(map, layers.flow_gauges.geojson_url, currentActive);
-          }
-          
-          this.updateFloodVisibility();
-        } catch (e) {
-          console.error('[initNationalLayers-Error]', e);
+      // Don't hide our own layers
+      if (id.startsWith('nz-')) return;
+
+      // Track all fill/background layers for toggling
+      if (layer.type === 'fill' || layer.type === 'background') {
+        this.topoLayers.push(layer.id);
+        // If we're starting in satellite mode, hide them immediately
+        if (this.currentMapMode() === 'satellite') {
+          map.setLayoutProperty(layer.id, 'visibility', 'none');
         }
+      }
+
+      // Hide ghost entries permanently
+      if (id.includes('address') || id.includes('house') || id.includes('point') || id.includes('number') ||
+          sl.includes('address') || sl.includes('house') || sl.includes('point') || sl.includes('number')) {
+        map.setLayoutProperty(layer.id, 'visibility', 'none');
+      }
+    });
+
+    // 3. NZ Address Points (Official ArcGIS FeatureServer)
+    map.addSource('nz-addresses-arcgis', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+
+    map.addLayer({
+      id: 'nz-addresses-layer',
+      type: 'circle',
+      source: 'nz-addresses-arcgis',
+      minzoom: 15,
+      paint: {
+        'circle-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 2, 18, 5
+        ],
+        'circle-color': '#ffffff',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#2196f3'
+      }
+    });
+
+    map.addLayer({
+      id: 'nz-address-labels',
+      type: 'symbol',
+      source: 'nz-addresses-arcgis',
+      minzoom: 17,
+      layout: {
+        'text-field': ['concat', ['get', 'full_address_number'], ' ', ['get', 'full_road_name']],
+        'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+        'text-size': 11,
+        'text-offset': [0, 1.3],
+        'text-anchor': 'top'
       },
-      error: (err) => console.error('Could not fetch national flood layer info:', err)
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': '#000000',
+        'text-halo-width': 1.5
+      }
+    });
+
+    this.refreshAddressesInView(map);
+  }
+
+  private refreshAddressesInView(map: maplibregl.Map) {
+    if (map.getZoom() < 15) return;
+    const b = map.getBounds();
+    const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+    const url = `https://services.arcgis.com/xdsHIIxuCWByZiCB/arcgis/rest/services/LINZ_NZ_Addresses/FeatureServer/0/query?where=1%3D1&geometry=${bbox}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&f=geojson&outSR=4326&resultRecordCount=1000`;
+    
+    const source = map.getSource('nz-addresses-arcgis') as maplibregl.GeoJSONSource;
+    source?.setData(url);
+  }
+
+  private initFloodLayers(map: maplibregl.Map) {
+    const active = this.isLayerActive('flood');
+    const visibility = active ? 'visible' : 'none';
+
+    // 1. River Network Source & Layer
+    map.addSource('flood-rivers', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    this.addRiverNetworkLayer(map, '', active);
+
+    // 2. Flood Plains Source & Layer
+    map.addSource('flood-plains', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    this.addFloodPlainsLayer(map, '', active);
+
+    // 3. Flow Gauges Source (Clustered)
+    map.addSource('flood-gauges', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      cluster: true,
+      clusterMaxZoom: 12,
+      clusterRadius: 50
+    });
+    this.addFlowGaugesLayer(map, '', active);
+
+    this.floodLayersAdded = true;
+    this.refreshFloodInView(map);
+  }
+
+  private refreshFloodInView(map: maplibregl.Map) {
+    if (!this.isLayerActive('flood')) return;
+
+    const bounds = map.getBounds();
+    this.floodService.getFloodInfoForExtent(
+      bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()
+    ).subscribe({
+      next: (info: any) => {
+        if (info.rivers_url) {
+          const source = map.getSource('flood-rivers') as maplibregl.GeoJSONSource;
+          source?.setData(info.rivers_url);
+        }
+        if (info.gauges_url) {
+          const source = map.getSource('flood-gauges') as maplibregl.GeoJSONSource;
+          source?.setData(info.gauges_url);
+        }
+      }
     });
   }
 
   private initRegionalWatch(map: maplibregl.Map) {
-    map.on('moveend', () => this.checkRegionalFlood(map));
+    map.on('moveend', () => {
+      this.checkRegionalFlood(map);
+      this.refreshFloodInView(map);
+      this.refreshAddressesInView(map);
+    });
   }
 
   private checkRegionalFlood(map: maplibregl.Map) {
     if (!this.isLayerActive('flood')) return;
-
-    const zoom = map.getZoom();
-    if (zoom < 8) return;
+    if (map.getZoom() < 8) return;
 
     const center = map.getCenter();
     this.propertyService.getCouncilInfo(center.lat, center.lng).subscribe({
@@ -155,7 +304,6 @@ export class MapExplorerComponent implements OnInit {
     this.floodService.getRegionalLayerInfo(councilName).subscribe({
       next: (info) => {
         if (!info || !info.url) return;
-        
         if (map.getLayer('flood-regional-fill')) map.removeLayer('flood-regional-fill');
         if (map.getLayer('flood-regional-raster')) map.removeLayer('flood-regional-raster');
         if (map.getSource('flood-regional')) map.removeSource('flood-regional');
@@ -163,59 +311,52 @@ export class MapExplorerComponent implements OnInit {
         const beforeId = map.getLayer('flood-rivers-layer') ? 'flood-rivers-layer' : undefined;
 
         if (info.type === 'raster') {
-          map.addSource('flood-regional', {
-            type: 'raster',
-            tiles: [info.url],
-            tileSize: 256
-          });
+          map.addSource('flood-regional', { type: 'raster', tiles: [info.url], tileSize: 256 });
           map.addLayer({
             id: 'flood-regional-raster',
             type: 'raster',
             source: 'flood-regional',
-            layout: {
-              'visibility': this.isLayerActive('flood') ? 'visible' : 'none'
-            },
-            paint: { 'raster-opacity': 0.6 }
+            layout: { 'visibility': 'visible' },
+            paint: { 'raster-opacity': 0.7 }
           }, beforeId);
         } else {
-          map.addSource('flood-regional', {
-            type: 'geojson',
-            data: info.geojson_url
-          });
+          map.addSource('flood-regional', { type: 'geojson', data: info.geojson_url });
+          
+          // Add the fill layer for the area
           map.addLayer({
             id: 'flood-regional-fill',
             type: 'fill',
             source: 'flood-regional',
-            layout: {
-              'visibility': this.isLayerActive('flood') ? 'visible' : 'none'
-            },
+            layout: { 'visibility': 'visible' },
             paint: {
-              'fill-color': '#03a9f4',
-              'fill-opacity': 0.5,
-              'fill-outline-color': '#01579b'
+              'fill-color': '#2962ff',
+              'fill-opacity': 0.35
             }
           }, beforeId);
+
+          // Add a line/border layer to make the boundaries clear
+          map.addLayer({
+            id: 'flood-regional-outline',
+            type: 'line',
+            source: 'flood-regional',
+            layout: { 'visibility': 'visible' },
+            paint: {
+              'line-color': '#0d47a1',
+              'line-width': 1.5,
+              'line-opacity': 0.8
+            }
+          }, 'flood-regional-fill');
         }
-      },
-      error: (err) => console.warn(`No regional flood data for ${councilName}:`, err)
+      }
     });
   }
 
-  private addFloodPlainsLayer(map: maplibregl.Map, geojsonUrl: string, active: boolean) {
-    if (map.getSource('flood-plains')) return;
-
-    map.addSource('flood-plains', {
-      type: 'geojson',
-      data: geojsonUrl,
-    });
-
+  private addFloodPlainsLayer(map: maplibregl.Map, url: string, active: boolean) {
     map.addLayer({
       id: 'flood-plains-layer',
       type: 'fill',
       source: 'flood-plains',
-      layout: {
-        'visibility': active ? 'visible' : 'none'
-      },
+      layout: { 'visibility': active ? 'visible' : 'none' },
       paint: {
         'fill-color': '#60a5fa',
         'fill-opacity': 0.4,
@@ -224,66 +365,73 @@ export class MapExplorerComponent implements OnInit {
     }); 
   }
 
-  private addRiverNetworkLayer(map: maplibregl.Map, geojsonUrl: string, active: boolean) {
-    if (map.getSource('flood-rivers')) return;
-    console.log('[Adding-River-Layer]', geojsonUrl);
-
-    map.addSource('flood-rivers', {
-      type: 'geojson',
-      data: geojsonUrl,
-    });
-
+  private addRiverNetworkLayer(map: maplibregl.Map, url: string, active: boolean) {
     map.addLayer({
       id: 'flood-rivers-layer',
       type: 'line',
       source: 'flood-rivers',
-      layout: {
-        'visibility': active ? 'visible' : 'none'
-      },
+      layout: { 'visibility': active ? 'visible' : 'none' },
       paint: {
         'line-color': [
           'interpolate', ['linear'],
           ['coalesce', ['get', 'H_C18_MAF'], 0],
-          0,    '#93c5fd', // Light Blue
-          100,  '#3b82f6', // Bright Blue
-          1000, '#1d4ed8', // Deep Blue
-          5000, '#1e3a8a'  // Indigo
+          0, '#93c5fd', 100, '#3b82f6', 1000, '#1d4ed8', 5000, '#1e3a8a'
         ],
         'line-width': [
           'interpolate', ['exponential', 1.5], ['zoom'],
-          4, ['interpolate', ['linear'], ['coalesce', ['get', 'q100_reach'], 0],
-              0, 2, 500, 6, 5000, 12],
-          12, ['interpolate', ['linear'], ['coalesce', ['get', 'q100_reach'], 0],
-               0, 4, 1000, 15, 5000, 25]
+          4, ['interpolate', ['linear'], ['coalesce', ['get', 'q100_reach'], 0], 0, 2, 500, 6, 5000, 12],
+          12, ['interpolate', ['linear'], ['coalesce', ['get', 'q100_reach'], 0], 0, 4, 1000, 15, 5000, 25]
         ],
         'line-opacity': 0.9,
       },
     });
   }
 
-  private addFlowGaugesLayer(map: maplibregl.Map, geojsonUrl: string, active: boolean) {
-    map.addSource('flood-gauges', {
-      type: 'geojson',
-      data: geojsonUrl,
+  private addFlowGaugesLayer(map: maplibregl.Map, url: string, active: boolean) {
+    const visibility = active ? 'visible' : 'none';
+
+    // Cluster Circles
+    map.addLayer({
+      id: 'flood-gauges-cluster',
+      type: 'circle',
+      source: 'flood-gauges',
+      filter: ['has', 'point_count'],
+      layout: { 'visibility': visibility },
+      paint: {
+        'circle-color': '#ff9800',
+        'circle-radius': ['step', ['get', 'point_count'], 20, 10, 30, 30, 40],
+        'circle-opacity': 0.8,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
     });
 
+    // Cluster Counts
+    map.addLayer({
+      id: 'flood-gauges-count',
+      type: 'symbol',
+      source: 'flood-gauges',
+      filter: ['has', 'point_count'],
+      layout: {
+        'visibility': visibility,
+        'text-field': '{point_count}',
+        'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+        'text-size': 12
+      }
+    });
+
+    // Individual Points
     map.addLayer({
       id: 'flood-gauges-layer',
       type: 'circle',
       source: 'flood-gauges',
-      layout: {
-        'visibility': active ? 'visible' : 'none'
-      },
+      filter: ['!', ['has', 'point_count']],
+      layout: { 'visibility': visibility },
       paint: {
-        'circle-radius': [
-          'interpolate', ['linear'], ['zoom'],
-          5, 3,
-          12, 10
-        ],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 12],
         'circle-color': '#ff5722',
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': 1.5,
-        'circle-opacity': 1,
+        'circle-stroke-width': 1.5
       },
     });
   }

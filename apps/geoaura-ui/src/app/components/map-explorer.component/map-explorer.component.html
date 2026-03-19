@@ -33,3 +33,23 @@
         }
       </div>
     </div>
+
+    <!-- Map Mode Switcher -->
+    <div class="map-mode-switcher">
+      <div 
+        class="mode-option" 
+        [class.active]="currentMapMode() === 'topo'"
+        (click)="toggleMapMode('topo')"
+      >
+        <img src="/assets/map-modes/topo.png" alt="Map mode">
+        <span class="mode-label">Map</span>
+      </div>
+      <div 
+        class="mode-option" 
+        [class.active]="currentMapMode() === 'satellite'"
+        (click)="toggleMapMode('satellite')"
+      >
+        <img src="/assets/map-modes/satellite.png" alt="Satellite mode">
+        <span class="mode-label">Satellite</span>
+      </div>
+    </div>
