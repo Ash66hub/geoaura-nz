@@ -125,14 +125,12 @@ export class MapExplorerComponent implements OnInit {
     map.on('load', () => {
       this.initBasemapLayers(map);
       this.initRegionalWatch(map);
-      // We don't call initNationalLayers here anymore, updateFloodVisibility handles it
     });
   }
 
   private initBasemapLayers(map: maplibregl.Map) {
     const style = map.getStyle();
     
-    // 1. NZ Aerial Imagery (LINZ)
     map.addSource('nz-aerial', {
       type: 'raster',
       tiles: [
@@ -142,7 +140,6 @@ export class MapExplorerComponent implements OnInit {
       attribution: '&copy; <a href="https://www.linz.govt.nz/">LINZ</a>'
     });
 
-    // Layer injection: Put it at the very bottom
     map.addLayer({
       id: 'nz-aerial-layer',
       type: 'raster',
@@ -151,32 +148,26 @@ export class MapExplorerComponent implements OnInit {
       paint: { 'raster-opacity': 1 }
     }, style.layers?.[0]?.id);
 
-    // 2. Identify "Opaque" topo layers for toggling
     this.topoLayers = [];
     style.layers?.forEach(layer => {
       const id = layer.id.toLowerCase();
       const sl = ((layer as any)['source-layer'] || '').toLowerCase();
 
-      // Don't hide our own layers
       if (id.startsWith('nz-')) return;
 
-      // Track all fill/background layers for toggling
       if (layer.type === 'fill' || layer.type === 'background') {
         this.topoLayers.push(layer.id);
-        // If we're starting in satellite mode, hide them immediately
         if (this.currentMapMode() === 'satellite') {
           map.setLayoutProperty(layer.id, 'visibility', 'none');
         }
       }
 
-      // Hide ghost entries permanently
       if (id.includes('address') || id.includes('house') || id.includes('point') || id.includes('number') ||
           sl.includes('address') || sl.includes('house') || sl.includes('point') || sl.includes('number')) {
         map.setLayoutProperty(layer.id, 'visibility', 'none');
       }
     });
 
-    // 3. NZ Address Points (Official ArcGIS FeatureServer)
     map.addSource('nz-addresses-arcgis', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] }
@@ -322,7 +313,6 @@ export class MapExplorerComponent implements OnInit {
         } else {
           map.addSource('flood-regional', { type: 'geojson', data: info.geojson_url });
           
-          // Add the fill layer for the area
           map.addLayer({
             id: 'flood-regional-fill',
             type: 'fill',
@@ -334,7 +324,6 @@ export class MapExplorerComponent implements OnInit {
             }
           }, beforeId);
 
-          // Add a line/border layer to make the boundaries clear
           map.addLayer({
             id: 'flood-regional-outline',
             type: 'line',

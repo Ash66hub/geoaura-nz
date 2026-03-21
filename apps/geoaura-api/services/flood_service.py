@@ -37,7 +37,6 @@ COUNCIL_FLOOD_ENDPOINTS: dict[str, dict] = {
     },
 }
 
-# NIWA Henderson & Collins (2018) — confirmed public endpoints from ArcGIS Hub
 NIWA_RIVER_NETWORK_URL = (
     "https://services3.arcgis.com/fp1tibNcN9mbExhG/arcgis/rest/services/"
     "NZ_Flood_Statistics_Henderson_Collins_V2_REC1_Layer_WFL1/FeatureServer/0"
