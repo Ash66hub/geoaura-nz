@@ -1,0 +1,56 @@
+<div #mapContainer class="map-container"></div>
+    
+    <div class="layer-control-panel">
+      <div class="layer-header">
+        <span class="layer-header-title">Layer Control</span>
+      </div>
+      
+      <div class="layer-list">
+        @for (layer of layers(); track layer.id) {
+          <div 
+            class="layer-item" 
+            [class.active-primary]="layer.active && layer.colorClass === 'primary'"
+            [class.active-orange]="layer.active && layer.colorClass === 'orange'"
+            (click)="toggleLayer(layer.id)"
+          >
+            <div class="layer-info">
+              <span class="material-symbols-outlined layer-icon" [ngClass]="layer.iconColorClass">
+                {{ layer.icon }}
+              </span>
+              <span class="layer-name" [class.text-slate-100]="layer.active">
+                {{ layer.name }}
+              </span>
+            </div>
+            <div 
+              class="toggle-track" 
+              [class.on-primary]="layer.active && layer.colorClass === 'primary'"
+              [class.on-orange]="layer.active && layer.colorClass === 'orange'"
+            >
+              <div class="toggle-knob"></div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="map-mode-switcher">
+      <div 
+        class="mode-option" 
+        [class.active]="currentMapMode() === 'topo'"
+        (click)="toggleMapMode('topo')"
+      >
+        <img src="/assets/map-modes/topo.png" alt="Map mode">
+        <span class="mode-label">Map</span>
+      </div>
+      <div 
+        class="mode-option" 
+        [class.active]="currentMapMode() === 'satellite'"
+        (click)="toggleMapMode('satellite')"
+      >
+        <img src="/assets/map-modes/satellite.png" alt="Satellite mode">
+        <span class="mode-label">Satellite</span>
+      </div>
+    </div>
+@if (selectedGauge()) {
+  <app-gauge-modal [properties]="selectedGauge()!" (close)="selectedGauge.set(null)"></app-gauge-modal>
+}

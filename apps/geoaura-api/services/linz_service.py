@@ -86,10 +86,52 @@ class LINZService:
             return await self._query_layer(LINZLayer.BUILDING_OUTLINES, lat, lng, client)
 
     async def get_council_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
-        if not self.api_key:
-            raise ValueError("LINZ_API_KEY is missing")
+        """Resolve territorial authority (council) from ArcGIS TA polygons."""
+        arcgis_url = (
+            "https://services.arcgis.com/XTtANUDT8Va4DLwI/arcgis/rest/services/"
+            "nz_territorial_authorities/FeatureServer/0/query"
+        )
+
         async with httpx.AsyncClient() as client:
-            return await self._query_layer(LINZLayer.TERRITORIAL_AUTHORITIES, lat, lng, client)
+            try:
+                params = {
+                    "where": "1=1",
+                    "geometry": f"{lng},{lat}",
+                    "geometryType": "esriGeometryPoint",
+                    "inSR": "4326",
+                    "spatialRel": "esriSpatialRelIntersects",
+                    "outFields": "TA_name,TA_name_ascii,TA_code",
+                    "f": "json",
+                }
+                response = await client.get(arcgis_url, params=params, timeout=20.0)
+                response.raise_for_status()
+                data = response.json()
+                features = data.get("features", [])
+
+                if features:
+                    attrs = features[0].get("attributes", {})
+                    council_name = attrs.get("TA_name") or attrs.get("TA_name_ascii")
+                    if council_name:
+                        return {
+                            "name": council_name,
+                            "council": council_name,
+                            "id": attrs.get("TA_code"),
+                        }
+            except Exception as e:
+                logger.warning(f"ArcGIS council lookup failed, falling back to LINZ address lookup: {e}")
+
+            # Fallback to LINZ addresses territorial_authority for edge cases.
+            if self.api_key:
+                address_data = await self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="500")
+                council_name = (address_data or {}).get("territorial_authority")
+                if council_name:
+                    return {
+                        "name": council_name,
+                        "council": council_name,
+                        "id": None,
+                    }
+
+            return None
 
     async def get_building_details_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         if not self.api_key:

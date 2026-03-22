@@ -1,0 +1,216 @@
+:host {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100vh;
+}
+
+.map-container {
+  width: 100%;
+  height: 100%;
+}
+
+.layer-control-panel {
+  position: absolute;
+  top: 130px;
+  left: 24px;
+  z-index: 30;
+  width: 224px;
+  background: rgba(17, 33, 31, 0.9);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(31, 224, 202, 0.2);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  color: #f1f5f9;
+  font-family: 'Inter', sans-serif;
+}
+
+.layer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding: 0 0.25rem;
+}
+
+.layer-header-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.layer-header-icon {
+  font-size: 1rem;
+  color: #64748b;
+}
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  &.active-primary {
+    background: rgba(31, 224, 202, 0.05);
+    border-color: rgba(31, 224, 202, 0.1);
+    &:hover {
+      background: rgba(31, 224, 202, 0.1);
+    }
+  }
+
+  &.active-orange {
+    background: rgba(249, 115, 22, 0.05);
+    border-color: rgba(249, 115, 22, 0.1);
+    &:hover {
+      background: rgba(249, 115, 22, 0.1);
+    }
+  }
+}
+
+.layer-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.layer-icon {
+  font-size: 1.125rem;
+}
+
+.layer-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.layer-item:not(.active-primary):not(.active-orange) {
+  .layer-name {
+    color: #94a3b8;
+  }
+  &:hover .layer-name {
+    color: #e2e8f0;
+  }
+}
+
+.toggle-track {
+  width: 2rem;
+  height: 1rem;
+  border-radius: 9999px;
+  position: relative;
+  background: #334155;
+
+  .toggle-knob {
+    position: absolute;
+    top: 0.125rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    transition: all 0.2s;
+    background: #64748b;
+    left: 0.125rem;
+  }
+
+  &.on-primary {
+    background: rgba(31, 224, 202, 0.4);
+    .toggle-knob {
+      background: #1fe0ca;
+      left: 1.125rem;
+    }
+  }
+
+  &.on-orange {
+    background: rgba(249, 115, 22, 0.4);
+    .toggle-knob {
+      background: #f97316;
+      left: 1.125rem;
+    }
+  }
+}
+
+.text-primary { color: #1fe0ca; }
+.text-blue-400 { color: #60a5fa; }
+.text-accent-orange { color: #f97316; }
+.text-slate-500 { color: #64748b; }
+.text-slate-100 { color: #f1f5f9; }
+
+.map-mode-switcher {
+  position: absolute;
+  bottom: 120px;
+  left: 24px;
+  z-index: 30;
+  display: flex;
+  gap: 12px;
+  background: rgba(17, 33, 31, 0.85);
+  backdrop-filter: blur(12px);
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(31, 224, 202, 0.2);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+
+  .mode-option {
+    position: relative;
+    width: 68px;
+    height: 68px;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 2px solid transparent;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+
+    &:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 15px rgba(0, 0, 0, 0.5);
+    }
+
+    &.active {
+      border-color: #1fe0ca;
+      box-shadow: 0 0 15px rgba(31, 224, 202, 0.3);
+      
+      .mode-label {
+        background: rgba(31, 224, 202, 0.9);
+        color: #000;
+        font-weight: 700;
+      }
+    }
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .mode-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      font-size: 10px;
+      text-align: center;
+      padding: 2px 0;
+      font-family: 'Inter', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: background 0.2s;
+    }
+  }
+}

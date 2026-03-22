@@ -6,16 +6,11 @@ import { environment } from '../../environments/environment';
 @Injectable({
   providedIn: 'root',
 })
-export class FloodService {
+export class SeismicService {
   private http = inject(HttpClient);
-  private baseUrl = environment.apiUrl + '/flood';
+  private baseUrl = environment.apiUrl + '/seismic';
 
-  public async getHamiltonHazardGeoJson(url: string, signal?: AbortSignal): Promise<any> {
-    const proxyUrl = `${environment.apiUrl}/proxy/hamilton-hazard?url=${encodeURIComponent(url)}`;
-    return fetch(proxyUrl, { signal }).then((res) => res.json());
-  }
-
-  public getFloodInfoForExtent(
+  getSeismicInfoForExtent(
     minLng: number,
     minLat: number,
     maxLng: number,
