@@ -1,0 +1,110 @@
+@if (model) {
+  <div class="panel-container glass-panel" [class.is-minimized]="minimized">
+    <div class="panel-header">
+      <div class="header-title">
+        <span class="material-symbols-outlined layer-icon" [style.color]="model.color">{{
+          model.icon
+        }}</span>
+        <h2>{{ model.title }}</h2>
+      </div>
+      <button
+        class="icon-btn close-btn"
+        type="button"
+        (click)="onToggleMinimize()"
+        [attr.aria-label]="minimized ? 'Restore panel' : 'Minimize panel'"
+      >
+        <span class="material-symbols-outlined">{{
+          minimized ? 'keyboard_arrow_up' : 'keyboard_arrow_down'
+        }}</span>
+      </button>
+    </div>
+
+    @if (minimized && !model.placeholder && model.sections.length > 0) {
+      <div class="minimized-symbol-strip" aria-label="Layer symbology preview">
+        @for (section of model.sections; track section.title) {
+          <span
+            class="min-symbol-item"
+            [class.is-loading]="section.loading"
+            [attr.aria-label]="section.title"
+            [attr.title]="section.title"
+          >
+            @if (section.symbolType) {
+              <span
+                class="section-symbol map-symbol"
+                [ngClass]="section.symbolType"
+                aria-hidden="true"
+              ></span>
+            } @else if (section.symbol) {
+              <span
+                class="material-symbols-outlined section-symbol"
+                [style.color]="section.symbolColor || '#60a5fa'"
+                aria-hidden="true"
+              >
+                {{ section.symbol }}
+              </span>
+            }
+            @if (section.loading) {
+              <span class="min-symbol-spinner" aria-label="Loading"></span>
+            }
+          </span>
+        }
+      </div>
+    }
+
+    <div class="panel-content" [class.is-collapsed]="minimized">
+      @if (model.placeholder) {
+        <div class="placeholder-state">
+          <span class="material-icons pending-icon">construction</span>
+          <h3>Coming Soon</h3>
+          <p>Detailed analytics and metadata for this layer are currently being integrated.</p>
+        </div>
+      } @else {
+        @for (section of model.sections; track section.title) {
+          <div class="detail-section">
+            <div class="section-header">
+              <div class="section-title-wrap">
+                @if (section.symbolType) {
+                  <span
+                    class="section-symbol map-symbol"
+                    [ngClass]="section.symbolType"
+                    aria-hidden="true"
+                  ></span>
+                } @else if (section.symbol) {
+                  <span
+                    class="material-symbols-outlined section-symbol"
+                    [style.color]="section.symbolColor || '#60a5fa'"
+                    aria-hidden="true"
+                  >
+                    {{ section.symbol }}
+                  </span>
+                }
+                <h3>{{ section.title }}</h3>
+                @if (section.loading) {
+                  <span class="section-loading-spinner" aria-label="Loading"></span>
+                }
+              </div>
+            </div>
+            <p class="section-desc">{{ section.description }}</p>
+            @if (section.source) {
+              <div class="section-source">
+                <span class="source-label">Source:</span>
+                @if (getSourceHref(section.source); as href) {
+                  <a
+                    class="source-link"
+                    [href]="href"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {{ section.source }}
+                  </a>
+                } @else {
+                  <span>{{ section.source }}</span>
+                }
+              </div>
+            }
+          </div>
+        }
+      }
+    </div>
+  </div>
+}

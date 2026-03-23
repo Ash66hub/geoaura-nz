@@ -42,29 +42,35 @@
 </div>
 
 <div class="map-mode-switcher">
-  <div
-    class="mode-option"
-    [class.active]="currentMapMode() === 'topo'"
-    (click)="toggleMapMode('topo')"
-    (keydown.enter)="toggleMapMode('topo')"
-    (keydown.space)="toggleMapMode('topo')"
-    tabindex="0"
-    role="button"
-  >
-    <img src="/assets/map-modes/topo.png" alt="Map mode" />
-    <span class="mode-label">Map</span>
+  <div class="mode-options-row">
+    <div
+      class="mode-option"
+      [class.active]="currentMapMode() === 'topo'"
+      (click)="toggleMapMode('topo')"
+      (keydown.enter)="toggleMapMode('topo')"
+      (keydown.space)="toggleMapMode('topo')"
+      tabindex="0"
+      role="button"
+    >
+      <img src="/assets/map-modes/topo.png" alt="Map mode" />
+      <span class="mode-label">Map</span>
+    </div>
+    <div
+      class="mode-option"
+      [class.active]="currentMapMode() === 'satellite'"
+      (click)="toggleMapMode('satellite')"
+      (keydown.enter)="toggleMapMode('satellite')"
+      (keydown.space)="toggleMapMode('satellite')"
+      tabindex="0"
+      role="button"
+    >
+      <img src="/assets/map-modes/satellite.png" alt="Satellite mode" />
+      <span class="mode-label">Satellite</span>
+    </div>
   </div>
-  <div
-    class="mode-option"
-    [class.active]="currentMapMode() === 'satellite'"
-    (click)="toggleMapMode('satellite')"
-    (keydown.enter)="toggleMapMode('satellite')"
-    (keydown.space)="toggleMapMode('satellite')"
-    tabindex="0"
-    role="button"
-  >
-    <img src="/assets/map-modes/satellite.png" alt="Satellite mode" />
-    <span class="mode-label">Satellite</span>
+
+  <div class="zoom-level-display" aria-live="polite">
+    <span>Zoom Level: {{ zoomLevel().toFixed(1) }}</span>
   </div>
 </div>
 @if (selectedGauge()) {
@@ -72,4 +78,14 @@
     [properties]="selectedGauge()!"
     (close)="selectedGauge.set(null)"
   ></app-gauge-modal>
+}
+
+@if (detailPanelModel()) {
+  <div class="right-detail-panel-overlay">
+    <app-detail-panel
+      [model]="detailPanelModel()"
+      [minimized]="isDetailPanelMinimized()"
+      (toggleMinimize)="toggleDetailPanelMinimized()"
+    ></app-detail-panel>
+  </div>
 }

@@ -13,7 +13,13 @@ def get_seismic_data_for_extent(
     limit: int = Query(500, description="Max feature count for seismic events")
 ):
     response = {
-        "url": seismic_service.get_query_url_with_bbox(min_lng, min_lat, max_lng, max_lat, limit=limit)
+        "url": seismic_service.get_query_url_with_bbox(min_lng, min_lat, max_lng, max_lat, limit=limit),
+        "fault_lines_url": seismic_service.get_fault_lines_query_url_with_bbox(
+            min_lng, min_lat, max_lng, max_lat, high_res=False
+        ),
+        "fault_lines_highres_url": seismic_service.get_fault_lines_query_url_with_bbox(
+            min_lng, min_lat, max_lng, max_lat, high_res=True
+        ),
     }
 
     return response
