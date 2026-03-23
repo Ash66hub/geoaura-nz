@@ -1,0 +1,78 @@
+<div class="address-search group">
+  <div class="address-search-glow"></div>
+  <div class="address-search-shell">
+    <span class="material-symbols-outlined search-icon">search</span>
+    <input
+      #addressInput
+      class="address-input"
+      placeholder="Search Address (e.g. 68 Flynn Road, Hillcrest)"
+      type="text"
+      [(ngModel)]="query"
+      (ngModelChange)="onQueryChange($event)"
+      (keydown)="onInputKeydown($event)"
+      (blur)="onInputBlur()"
+      (focus)="onInputFocus()"
+      aria-label="Search address"
+      autocomplete="off"
+    />
+    @if (query.trim().length > 0) {
+      <button
+        class="clear-btn"
+        type="button"
+        (click)="onClearClick()"
+        aria-label="Clear address input"
+      >
+        <span class="material-symbols-outlined clear-icon">close</span>
+      </button>
+    }
+    <div class="address-actions">
+      <button
+        class="mic-btn"
+        type="button"
+        (click)="onMicClick()"
+        [attr.aria-pressed]="isListening"
+        [attr.aria-label]="isListening ? 'Stop voice search' : 'Start voice search'"
+        [disabled]="!speechSupported"
+      >
+        <span class="material-symbols-outlined mic-icon">{{
+          isListening ? 'mic_off' : 'mic'
+        }}</span>
+      </button>
+      <div class="divider"></div>
+      <button class="search-btn" type="button" (click)="onSearchClick()">Search</button>
+    </div>
+  </div>
+
+  @if (showSuggestions || isListening || isLoading) {
+    <div
+      class="suggestions-panel"
+      role="listbox"
+      aria-label="Address suggestions"
+      (pointerdown)="onPanelPointerDown()"
+      (pointerup)="onPanelPointerUp()"
+      (pointercancel)="onPanelPointerUp()"
+    >
+      @if (isListening) {
+        <div class="suggestions-state" aria-live="polite">Listening...</div>
+      } @else if (isLoading) {
+        <div class="suggestions-state">Searching...</div>
+      } @else if (hasSearched && suggestions.length === 0) {
+        <div class="suggestions-state">No locations found</div>
+      } @else {
+        @for (suggestion of suggestions; track suggestion.id; let i = $index) {
+          <button
+            type="button"
+            class="suggestion-item"
+            [class.active]="i === highlightedIndex"
+            (click)="onSuggestionSelect(suggestion)"
+          >
+            <span class="suggestion-label">{{ suggestion.label }}</span>
+            @if (suggestion.territorial_authority) {
+              <span class="suggestion-meta">{{ suggestion.territorial_authority }}</span>
+            }
+          </button>
+        }
+      }
+    </div>
+  }
+</div>

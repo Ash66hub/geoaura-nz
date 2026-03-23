@@ -10,6 +10,17 @@
   height: 100%;
 }
 
+.address-search-overlay {
+  position: absolute;
+  top: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  width: min(100%, 42rem);
+  padding: 0 1rem;
+  box-sizing: border-box;
+}
+
 .layer-control-panel {
   position: absolute;
   top: 130px;
@@ -212,5 +223,13 @@
       letter-spacing: 0.5px;
       transition: background 0.2s;
     }
+  }
+}
+
+@media (max-width: 768px) {
+  .address-search-overlay {
+    top: 1rem;
+    width: calc(100% - 1rem);
+    padding: 0 0.5rem;
   }
 }

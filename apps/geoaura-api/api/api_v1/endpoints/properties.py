@@ -55,6 +55,20 @@ async def get_parcel(
     except Exception as e:
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.get("/parcel-geometry")
+async def get_parcel_geometry(
+    lat: float = Query(..., description="Latitude of the property (WGS84)"),
+    lng: float = Query(..., description="Longitude of the property (WGS84)")
+):
+    try:
+        return await linz_service.get_parcel_geometry_by_coords(lat, lng)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.get("/address")
 async def get_address(
     lat: float = Query(..., description="Latitude of the property (WGS84)"),
@@ -138,4 +152,17 @@ async def get_property_bridge(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/address-search")
+async def address_search(
+    q: str = Query(..., min_length=2, description="Address query text"),
+    limit: int = Query(5, ge=1, le=20, description="Maximum suggestions to return"),
+):
+    try:
+        return await linz_service.search_addresses(q, limit)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
         raise HTTPException(status_code=500, detail="Internal server error")

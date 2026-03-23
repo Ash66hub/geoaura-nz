@@ -3,11 +3,14 @@ import * as maplibregl from 'maplibre-gl';
 import { LngLatBoundsLike } from 'maplibre-gl';
 import { environment } from '../../../../environments/environment';
 import { FloodService } from '../../../services/flood.service';
-import { PropertyService } from '../../../services/property.service';
+import { AddressSuggestion, PropertyService } from '../../../services/property.service';
 import { SeismicService } from '../../../services/seismic.service';
 import { CommonModule } from '@angular/common';
 import { GaugeModalComponent } from '../flood-flow-gauge/gauge-modal/gauge-modal.component';
+import { AddressSearchComponent } from '../../shared/address-search/address-search.component';
 import { GaugeProperties, LayerItem } from '../../../common/flood-flow-gauge';
+import { of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 
 const NZ_BOUNDS: LngLatBoundsLike = [
   [165.0, -48.5],
@@ -17,11 +20,15 @@ const NZ_BOUNDS: LngLatBoundsLike = [
 @Component({
   selector: 'app-map-explorer',
   standalone: true,
-  imports: [CommonModule, GaugeModalComponent],
+  imports: [CommonModule, GaugeModalComponent, AddressSearchComponent],
   templateUrl: './map-explorer.component.html',
   styleUrl: './map-explorer.component.scss',
 })
 export class MapExplorerComponent implements OnInit {
+  private static readonly PROPERTY_BOUNDARY_SOURCE_ID = 'property-boundary-source';
+  private static readonly PROPERTY_BOUNDARY_FILL_LAYER_ID = 'property-boundary-fill';
+  private static readonly PROPERTY_BOUNDARY_LINE_LAYER_ID = 'property-boundary-line';
+
   private mapContainer = viewChild<ElementRef>('mapContainer');
   private floodService = inject(FloodService);
   private seismicService = inject(SeismicService);
@@ -85,6 +92,9 @@ export class MapExplorerComponent implements OnInit {
   private seismicRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private seismicFetchController: AbortController | null = null;
   private lastSeismicRequestKey: string | null = null;
+  private searchResultMarker: maplibregl.Marker | null = null;
+  private boundaryLookupRequestId = 0;
+  private boundaryCandidateLayerIds: string[] = [];
 
   toggleMapMode(mode: 'satellite' | 'topo') {
     this.currentMapMode.set(mode);
@@ -120,6 +130,72 @@ export class MapExplorerComponent implements OnInit {
 
   private isLayerActive(id: string): boolean {
     return this.layers().find((l) => l.id === id)?.active ?? false;
+  }
+
+  onAddressSelected(suggestion: AddressSuggestion) {
+    if (!this.map) return;
+
+    this.map.flyTo({
+      center: [suggestion.lng, suggestion.lat],
+      zoom: 19,
+      speed: 1.5,
+      essential: true,
+    });
+
+    this.setSelectionBlip(suggestion.lng, suggestion.lat);
+
+    this.map.once('moveend', () => {
+      this.highlightPropertyBoundaryAt(suggestion.lat, suggestion.lng);
+    });
+  }
+
+  private setSelectionBlip(lng: number, lat: number) {
+    if (!this.map) return;
+
+    if (!this.searchResultMarker) {
+      const markerRoot = document.createElement('div');
+      markerRoot.style.position = 'relative';
+      markerRoot.style.width = '18px';
+      markerRoot.style.height = '18px';
+
+      const pulse = document.createElement('div');
+      pulse.style.position = 'absolute';
+      pulse.style.left = '50%';
+      pulse.style.top = '50%';
+      pulse.style.width = '28px';
+      pulse.style.height = '28px';
+      pulse.style.borderRadius = '50%';
+      pulse.style.border = '2px solid rgba(31, 224, 202, 0.8)';
+      pulse.style.transform = 'translate(-50%, -50%)';
+
+      pulse.animate(
+        [
+          { transform: 'translate(-50%, -50%) scale(0.5)', opacity: 0.85 },
+          { transform: 'translate(-50%, -50%) scale(1.8)', opacity: 0 },
+        ],
+        { duration: 1400, iterations: Infinity, easing: 'ease-out' },
+      );
+
+      const core = document.createElement('div');
+      core.style.position = 'absolute';
+      core.style.left = '50%';
+      core.style.top = '50%';
+      core.style.width = '12px';
+      core.style.height = '12px';
+      core.style.borderRadius = '50%';
+      core.style.background = '#1fe0ca';
+      core.style.boxShadow = '0 0 0 2px #0f172a';
+      core.style.transform = 'translate(-50%, -50%)';
+
+      markerRoot.appendChild(pulse);
+      markerRoot.appendChild(core);
+
+      this.searchResultMarker = new maplibregl.Marker({ element: markerRoot, anchor: 'center' })
+        .setLngLat([lng, lat])
+        .addTo(this.map);
+    } else {
+      this.searchResultMarker.setLngLat([lng, lat]);
+    }
   }
 
   private updateFloodVisibility() {
@@ -172,6 +248,7 @@ export class MapExplorerComponent implements OnInit {
 
     map.on('load', () => {
       this.initBasemapLayers(map);
+      this.initPropertyBoundaryLayers(map);
 
       map.on('moveend', () => {
         this.refreshFloodInView(map);
@@ -205,6 +282,7 @@ export class MapExplorerComponent implements OnInit {
     );
 
     this.topoLayers = [];
+    this.boundaryCandidateLayerIds = [];
     style.layers?.forEach((layer) => {
       const id = layer.id.toLowerCase();
       const sl = ((layer as any)['source-layer'] || '').toLowerCase();
@@ -229,6 +307,21 @@ export class MapExplorerComponent implements OnInit {
         sl.includes('number')
       ) {
         map.setLayoutProperty(layer.id, 'visibility', 'none');
+      }
+
+      const isBoundaryCandidate =
+        (layer.type === 'fill' || layer.type === 'line') &&
+        (id.includes('parcel') ||
+          id.includes('cadastre') ||
+          id.includes('property') ||
+          id.includes('title') ||
+          sl.includes('parcel') ||
+          sl.includes('cadastre') ||
+          sl.includes('property') ||
+          sl.includes('title'));
+
+      if (isBoundaryCandidate) {
+        this.boundaryCandidateLayerIds.push(layer.id);
       }
     });
 
@@ -269,7 +362,197 @@ export class MapExplorerComponent implements OnInit {
       },
     });
 
+    this.bindAddressCircleInteractions(map);
+
     this.refreshAddressesInView(map);
+  }
+
+  private bindAddressCircleInteractions(map: maplibregl.Map) {
+    map.on('mouseenter', 'nz-addresses-layer', () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+
+    map.on('mouseleave', 'nz-addresses-layer', () => {
+      map.getCanvas().style.cursor = '';
+    });
+
+    map.on('click', 'nz-addresses-layer', (e) => {
+      const feature = e.features?.[0];
+      this.highlightPropertyBoundaryFromFeatureOrClick(feature, e.lngLat.lng, e.lngLat.lat);
+    });
+  }
+
+  private highlightPropertyBoundaryFromFeatureOrClick(
+    feature: maplibregl.MapGeoJSONFeature | undefined,
+    fallbackLng: number,
+    fallbackLat: number,
+  ) {
+    const geometry = feature?.geometry;
+
+    if (geometry?.type === 'Point') {
+      const [lng, lat] = geometry.coordinates;
+      this.setSelectionBlip(lng, lat);
+      this.highlightPropertyBoundaryAt(lat, lng);
+      return;
+    }
+
+    this.setSelectionBlip(fallbackLng, fallbackLat);
+    this.highlightPropertyBoundaryAt(fallbackLat, fallbackLng);
+  }
+
+  private initPropertyBoundaryLayers(map: maplibregl.Map) {
+    if (!map.getSource(MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID)) {
+      map.addSource(MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+
+    if (!map.getLayer(MapExplorerComponent.PROPERTY_BOUNDARY_FILL_LAYER_ID)) {
+      map.addLayer({
+        id: MapExplorerComponent.PROPERTY_BOUNDARY_FILL_LAYER_ID,
+        type: 'fill',
+        source: MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
+        paint: {
+          'fill-color': '#14b8a6',
+          'fill-opacity': 0.14,
+        },
+      });
+    }
+
+    if (!map.getLayer(MapExplorerComponent.PROPERTY_BOUNDARY_LINE_LAYER_ID)) {
+      map.addLayer({
+        id: MapExplorerComponent.PROPERTY_BOUNDARY_LINE_LAYER_ID,
+        type: 'line',
+        source: MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
+        paint: {
+          'line-color': '#14b8a6',
+          'line-width': 3,
+        },
+      });
+    }
+  }
+
+  private highlightPropertyBoundaryAt(lat: number, lng: number) {
+    if (!this.map) return;
+
+    const requestId = ++this.boundaryLookupRequestId;
+    this.propertyService
+      .getParcelGeometry(lat, lng)
+      .pipe(catchError(() => of(null)))
+      .subscribe((feature) => {
+        if (!this.map || requestId !== this.boundaryLookupRequestId) return;
+
+        const source = this.map.getSource(
+          MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
+        ) as maplibregl.GeoJSONSource;
+        if (!source) return;
+
+        if (!feature) {
+          if (!this.highlightBoundaryFromRenderedLayers(lat, lng)) {
+            source.setData({ type: 'FeatureCollection', features: [] });
+          }
+          return;
+        }
+
+        source.setData({
+          type: 'FeatureCollection',
+          features: [feature],
+        });
+      });
+  }
+
+  private highlightBoundaryFromRenderedLayers(lat: number, lng: number): boolean {
+    if (!this.map || this.boundaryCandidateLayerIds.length === 0) return false;
+
+    const pixel = this.map.project([lng, lat]);
+    const candidates = this.map.queryRenderedFeatures(
+      [
+        [pixel.x - 4, pixel.y - 4],
+        [pixel.x + 4, pixel.y + 4],
+      ],
+      {
+        layers: this.boundaryCandidateLayerIds,
+      },
+    );
+
+    const polygons = candidates.filter(
+      (f) => f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon',
+    );
+    const boundary =
+      polygons.find((f) => this.geometryContainsPoint(f.geometry, lng, lat)) ?? polygons[0];
+
+    if (!boundary || !boundary.geometry) {
+      return false;
+    }
+
+    const source = this.map.getSource(
+      MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
+    ) as maplibregl.GeoJSONSource;
+    if (!source) return false;
+
+    source.setData({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: boundary.geometry,
+          properties: boundary.properties || {},
+        },
+      ],
+    });
+
+    return true;
+  }
+
+  private geometryContainsPoint(
+    geometry: GeoJSON.Geometry | null | undefined,
+    lng: number,
+    lat: number,
+  ): boolean {
+    if (!geometry) return false;
+
+    if (geometry.type === 'Polygon') {
+      return this.polygonContainsPoint(geometry.coordinates, lng, lat);
+    }
+
+    if (geometry.type === 'MultiPolygon') {
+      return geometry.coordinates.some((polygon) => this.polygonContainsPoint(polygon, lng, lat));
+    }
+
+    return false;
+  }
+
+  private polygonContainsPoint(polygon: number[][][], lng: number, lat: number): boolean {
+    if (polygon.length === 0) return false;
+
+    const insideOuter = this.ringContainsPoint(polygon[0], lng, lat);
+    if (!insideOuter) return false;
+
+    for (let i = 1; i < polygon.length; i++) {
+      if (this.ringContainsPoint(polygon[i], lng, lat)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private ringContainsPoint(ring: number[][], lng: number, lat: number): boolean {
+    let inside = false;
+
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0];
+      const yi = ring[i][1];
+      const xj = ring[j][0];
+      const yj = ring[j][1];
+
+      const intersects =
+        yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi + 1e-15) + xi;
+      if (intersects) inside = !inside;
+    }
+
+    return inside;
   }
 
   private refreshAddressesInView(map: maplibregl.Map) {
