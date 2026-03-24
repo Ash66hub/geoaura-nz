@@ -85,7 +85,10 @@
     <app-detail-panel
       [model]="detailPanelModel()"
       [minimized]="isDetailPanelMinimized()"
+      [showInfoModeToggle]="showDetailInfoToggle()"
+      [infoMode]="panelInfoMode()"
       (toggleMinimize)="toggleDetailPanelMinimized()"
+      (infoModeChange)="setPanelInfoMode($event)"
     ></app-detail-panel>
   </div>
 }

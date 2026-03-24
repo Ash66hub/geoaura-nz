@@ -3,7 +3,8 @@ import httpx
 import logging
 import asyncio
 import time
-from typing import Dict, Any, Optional
+import math
+from typing import Dict, Any, Optional, Union
 from models.enums.linz_layers import LINZLayer
 
 logger = logging.getLogger(__name__)
@@ -31,10 +32,213 @@ class LINZService:
             self._address_http_client_loop_id = loop_id
         return self._address_http_client
 
-    async def _query_layer(self, layer_id: str, lat: float, lng: float, client: httpx.AsyncClient, radius: str = "10") -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _coalesce(*values: Any) -> Optional[Any]:
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+        return None
+
+    @staticmethod
+    def _normalize_code(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return text.upper()
+
+    def map_dvr_property_category(self, dvr_data: Dict[str, Any]) -> Optional[str]:
+        raw_code = self._coalesce(
+            dvr_data.get("property_category"),
+            dvr_data.get("property_category_code"),
+            dvr_data.get("use_code"),
+        )
+        code = self._normalize_code(raw_code)
+        if not code:
+            return None
+
+        category_map = {
+            "RD": "Residential Dwelling",
+            "RM": "Residential Multi-unit",
+            "RF": "Residential Flat",
+            "RS": "Residential Other",
+            "CI": "Commercial / Industrial",
+            "CO": "Commercial",
+            "IN": "Industrial",
+            "RU": "Rural",
+            "LH": "Lifestyle",
+        }
+        return category_map.get(code)
+
+    def map_dvr_building_age(self, dvr_data: Dict[str, Any]) -> Optional[str]:
+        raw_code = self._coalesce(
+            dvr_data.get("building_age_indicator"),
+            dvr_data.get("building_age_code"),
+            dvr_data.get("age_code"),
+        )
+        code = self._normalize_code(raw_code)
+        if not code:
+            return None
+
+        age_map = {
+            "188": "1880-1889",
+            "189": "1890-1899",
+            "190": "1900-1909",
+            "191": "1910-1919",
+            "192": "1920-1929",
+            "193": "1930-1939",
+            "194": "1940-1949",
+            "195": "1950-1959",
+            "196": "1960-1969",
+            "197": "1970-1979",
+            "198": "1980-1989",
+            "199": "1990-1999",
+            "200": "2000-2009",
+            "201": "2010-2019",
+        }
+        return age_map.get(code)
+
+    def map_dvr_construction(self, dvr_data: Dict[str, Any]) -> Optional[str]:
+        raw_code = self._coalesce(
+            dvr_data.get("building_construction_indicator"),
+            dvr_data.get("building_construction_code"),
+            dvr_data.get("construction_indicator"),
+        )
+        code = self._normalize_code(raw_code)
+        if not code:
+            return None
+
+        construction_map = {
+            "XI": "Steel or Concrete",
+            "FI": "Fibre Cement",
+            "BI": "Brick",
+        }
+        return construction_map.get(code)
+
+    def derive_building_profile(
+        self,
+        dvr_data: Dict[str, Any],
+        building_details_data: Dict[str, Any],
+        building_outline_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Optional[Any]]:
+        dvr_use = self.map_dvr_property_category(dvr_data)
+        dvr_age = self.map_dvr_building_age(dvr_data)
+        dvr_construction = self.map_dvr_construction(dvr_data)
+        outline_use = self._coalesce((building_outline_data or {}).get("use"))
+        if isinstance(outline_use, str) and outline_use.strip().lower() == "unknown":
+            outline_use = None
+
+        return {
+            "use": dvr_use or self._coalesce(building_details_data.get("use"), outline_use),
+            "age": dvr_age or self._coalesce(building_details_data.get("age")),
+            "risk_class": dvr_construction or self._coalesce(building_details_data.get("predominant_use")),
+        }
+
+    @staticmethod
+    def _has_valid_area_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return value > 0
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return False
+            if text.lower() in {"unknown", "n/a", "na", "null", "none"}:
+                return False
+            return True
+        return False
+
+    @staticmethod
+    def _ring_area_square_meters(ring: list[list[float]], reference_lat: float) -> float:
+        if len(ring) < 3:
+            return 0.0
+
+        r = 6378137.0
+        ref_lat_rad = math.radians(reference_lat)
+        cos_ref = math.cos(ref_lat_rad)
+
+        projected: list[tuple[float, float]] = []
+        for point in ring:
+            if len(point) < 2:
+                continue
+            lon, lat = float(point[0]), float(point[1])
+            x = math.radians(lon) * r * cos_ref
+            y = math.radians(lat) * r
+            projected.append((x, y))
+
+        if len(projected) < 3:
+            return 0.0
+
+        area = 0.0
+        j = len(projected) - 1
+        for i in range(len(projected)):
+            xi, yi = projected[i]
+            xj, yj = projected[j]
+            area += (xj + xi) * (yj - yi)
+            j = i
+
+        return abs(area) * 0.5
+
+    def _estimate_polygon_area_square_meters(
+        self,
+        geometry: Optional[Dict[str, Any]],
+    ) -> Optional[float]:
+        if not isinstance(geometry, dict):
+            return None
+
+        gtype = geometry.get("type")
+        coords = geometry.get("coordinates")
+        if not isinstance(coords, list):
+            return None
+
+        def polygon_area(polygon: list[list[list[float]]]) -> float:
+            if not polygon or not isinstance(polygon[0], list):
+                return 0.0
+
+            outer_ring = polygon[0]
+            if not outer_ring:
+                return 0.0
+
+            lat_samples = [float(p[1]) for p in outer_ring if isinstance(p, list) and len(p) >= 2]
+            if not lat_samples:
+                return 0.0
+            reference_lat = sum(lat_samples) / len(lat_samples)
+
+            area = self._ring_area_square_meters(outer_ring, reference_lat)
+            for hole in polygon[1:]:
+                if isinstance(hole, list):
+                    area -= self._ring_area_square_meters(hole, reference_lat)
+            return max(area, 0.0)
+
+        if gtype == "Polygon":
+            area = polygon_area(coords)
+            return area if area > 0 else None
+
+        if gtype == "MultiPolygon":
+            total = 0.0
+            for polygon in coords:
+                if isinstance(polygon, list):
+                    total += polygon_area(polygon)
+            return total if total > 0 else None
+
+        return None
+
+    @staticmethod
+    def _layer_value(layer_id: Union[str, LINZLayer]) -> str:
+        if isinstance(layer_id, LINZLayer):
+            return layer_id.value
+        return str(layer_id)
+
+    async def _query_layer(self, layer_id: Union[str, LINZLayer], lat: float, lng: float, client: httpx.AsyncClient, radius: str = "10") -> Optional[Dict[str, Any]]:
+        layer_value = self._layer_value(layer_id)
         params = {
             "key": self.api_key,
-            "layer": layer_id,
+            "layer": layer_value,
             "x": str(lng),
             "y": str(lat),
             "srs": "EPSG:4326",
@@ -42,31 +246,64 @@ class LINZService:
             "radius": radius,
             "geometry": "true"
         }
-        
+
         try:
             response = await client.get(self.base_url, params=params)
             response.raise_for_status()
-            
+
             data = response.json()
             vector_query = data.get("vectorQuery", {})
             layers = vector_query.get("layers", {})
-            layer_data = layers.get(layer_id, {})
+            layer_data = layers.get(layer_value, {})
             features = layer_data.get("features", [])
 
             if not features:
+                logger.debug(f"No features found for layer {layer_value} at ({lat}, {lng}) with radius {radius}m")
                 return None
 
-            return features[0].get("properties", {})
+            result = features[0].get("properties", {})
+            logger.debug(f"Found feature for layer {layer_value}: {list(result.keys())}")
+            return result
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error occurred querying LINZ layer {layer_id}: {e}")
+            logger.error(f"HTTP error occurred querying LINZ layer {layer_value} at ({lat}, {lng}): {e}")
             raise
         except ValueError as e:
-            logger.error(f"Error parsing JSON from LINZ layer {layer_id}: {e}")
+            logger.error(f"Error parsing JSON from LINZ layer {layer_value}: {e}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error in _query_layer for {layer_id}: {e}")
+            logger.error(f"Unexpected error in _query_layer for {layer_value} at ({lat}, {lng}): {e}")
             raise
+
+    async def _query_layer_cql(
+        self,
+        layer_id: Union[str, LINZLayer],
+        cql_filter: str,
+        client: httpx.AsyncClient,
+        max_results: int = 10,
+        geometry: bool = True,
+    ) -> list[Dict[str, Any]]:
+        layer_value = self._layer_value(layer_id)
+        params = {
+            "key": self.api_key,
+            "layer": layer_value,
+            "srs": "EPSG:4326",
+            "max_results": str(max_results),
+            "geometry": "true" if geometry else "false",
+            "cql_filter": cql_filter,
+        }
+
+        response = await client.get(self.base_url, params=params)
+        response.raise_for_status()
+
+        payload = response.json() if response.text else {}
+        vector_query = payload.get("vectorQuery", {}) if isinstance(payload, dict) else {}
+        layers = vector_query.get("layers", {}) if isinstance(vector_query, dict) else {}
+        layer_data = layers.get(layer_value, {}) if isinstance(layers, dict) else {}
+        features = layer_data.get("features", []) if isinstance(layer_data, dict) else []
+        if isinstance(features, list):
+            return [f for f in features if isinstance(f, dict)]
+        return []
 
     async def get_property_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         if not self.api_key:
@@ -99,17 +336,27 @@ class LINZService:
                 lat,
                 lng,
                 client,
-                radius="150",
+                radius="200",
             )
             if property_title:
                 return property_title
+
+            current_parcel = await self._query_layer(
+                LINZLayer.PRIMARY_PARCELS_CURRENT,
+                lat,
+                lng,
+                client,
+                radius="200",
+            )
+            if current_parcel:
+                return current_parcel
 
             return await self._query_layer(
                 LINZLayer.PRIMARY_PARCELS,
                 lat,
                 lng,
                 client,
-                radius="150",
+                radius="200",
             )
 
     async def get_parcel_geometry_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
@@ -348,12 +595,17 @@ class LINZService:
             return None
 
         async with httpx.AsyncClient() as client:
-            candidate_layers = [LINZLayer.PROPERTY_TITLES, LINZLayer.PRIMARY_PARCELS]
+            candidate_layers = [
+                LINZLayer.PROPERTY_TITLES,
+                LINZLayer.PRIMARY_PARCELS_CURRENT,
+                LINZLayer.PRIMARY_PARCELS,
+            ]
             for radius in (10, 50, 150):
                 for layer in candidate_layers:
+                    layer_value = self._layer_value(layer)
                     params = {
                         "key": self.api_key,
-                        "layer": layer,
+                        "layer": layer_value,
                         "x": str(lng),
                         "y": str(lat),
                         "srs": "EPSG:4326",
@@ -368,7 +620,7 @@ class LINZService:
                     data = response.json()
                     vector_query = data.get("vectorQuery", {})
                     layers = vector_query.get("layers", {})
-                    layer_data = layers.get(layer, {})
+                    layer_data = layers.get(layer_value, {})
                     features = layer_data.get("features", [])
                     if not features:
                         continue
@@ -387,13 +639,13 @@ class LINZService:
         if not self.api_key:
             raise ValueError("LINZ_API_KEY is missing")
         async with httpx.AsyncClient() as client:
-            return await self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="50")
+            return await self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="100")
 
     async def get_building_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         if not self.api_key:
             raise ValueError("LINZ_API_KEY is missing")
         async with httpx.AsyncClient() as client:
-            return await self._query_layer(LINZLayer.BUILDING_OUTLINES, lat, lng, client)
+            return await self._query_layer(LINZLayer.BUILDING_OUTLINES, lat, lng, client, radius="50")
 
     async def get_council_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         """Resolve territorial authority (council) from ArcGIS TA polygons."""
@@ -447,7 +699,7 @@ class LINZService:
         if not self.api_key:
             raise ValueError("LINZ_API_KEY is missing")
         async with httpx.AsyncClient() as client:
-            return await self._query_layer(LINZLayer.BUILDING_DETAILS, lat, lng, client, radius="20")
+            return await self._query_layer(LINZLayer.BUILDING_DETAILS, lat, lng, client, radius="50")
 
     async def get_bridge_data_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         if not self.api_key:
@@ -461,61 +713,135 @@ class LINZService:
 
         async with httpx.AsyncClient() as client:
             results = await asyncio.gather(
-                self._query_layer(LINZLayer.PROPERTY_TITLES, lat, lng, client, radius="150"),
-                self._query_layer(LINZLayer.PRIMARY_PARCELS, lat, lng, client, radius="150"),
-                self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="50"),
-                self._query_layer(LINZLayer.TERRITORIAL_AUTHORITIES, lat, lng, client),
-                self._query_layer(LINZLayer.BUILDING_DETAILS, lat, lng, client, radius="20"),
-                self._query_layer(LINZLayer.PROP_BUILDING_BRIDGE, lat, lng, client),
-                return_exceptions=True
+                self._query_layer(LINZLayer.PROPERTY_TITLES, lat, lng, client, radius="200"),
+                self._query_layer(LINZLayer.PRIMARY_PARCELS_CURRENT, lat, lng, client, radius="200"),
+                self._query_layer(LINZLayer.PRIMARY_PARCELS, lat, lng, client, radius="200"),
+                self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="100"),
+                self._query_layer(LINZLayer.TERRITORIAL_AUTHORITIES, lat, lng, client, radius="500"),
+                self._query_layer(LINZLayer.DISTRICT_VALUATION_ROLL, lat, lng, client, radius="300"),
+                self._query_layer(LINZLayer.BUILDING_DETAILS, lat, lng, client, radius="50"),
+                self._query_layer(LINZLayer.BUILDING_OUTLINES, lat, lng, client, radius="50"),
+                self._query_layer(LINZLayer.PROP_BUILDING_BRIDGE, lat, lng, client, radius="200"),
+                return_exceptions=True,
             )
-            
+
             res = [r if not isinstance(r, Exception) else None for r in results]
-            
-            title_p, parcel_p, address_p, council_p, details_p, bridge_p = res
+            title_p, parcel_current_p, parcel_legacy_p, address_p, council_p, dvr_p, details_p, outlines_p, bridge_p = res
 
             if not any(res):
                 return None
 
-            title_p, parcel_p, address_p, council_p, details_p, bridge_p = [p or {} for p in res]
+            title_p = title_p or {}
+            parcel_p = (parcel_current_p or parcel_legacy_p or {})
+            address_p = address_p or {}
+            council_p = council_p or {}
+            dvr_p = dvr_p or {}
+            details_p = details_p or {}
+            outlines_p = outlines_p or {}
+            bridge_p = bridge_p or {}
+
+            # LINZ TA layer fields are not always aligned with the API's name/id shape.
+            # Fall back to ArcGIS TA lookup to keep council fields populated in summary responses.
+            if not (council_p.get("name") or council_p.get("council")):
+                resolved_council = await self.get_council_by_coords(lat, lng)
+                if resolved_council:
+                    council_p = resolved_council
+
+            improvements_value_raw = dvr_p.get("improvements_value")
+            try:
+                improvements_value = float(improvements_value_raw) if improvements_value_raw is not None else None
+            except (TypeError, ValueError):
+                improvements_value = None
+
+            has_improvements = None
+            if improvements_value is not None:
+                has_improvements = improvements_value > 0
+
+            building_profile = self.derive_building_profile(dvr_p, details_p, outlines_p)
+
+            parcel_area = title_p.get("title_area") or parcel_p.get("shape_area")
+            if not self._has_valid_area_value(parcel_area):
+                parcel_feature = await self.get_parcel_geometry_by_coords(lat, lng)
+                approx_area = self._estimate_polygon_area_square_meters(
+                    parcel_feature.get("geometry") if isinstance(parcel_feature, dict) else None
+                )
+                if approx_area is not None:
+                    parcel_area = f"~{int(round(approx_area))} m2"
+
+            title_numbers: list[str] = []
+            title_no = title_p.get("title_no")
+            if isinstance(title_no, str) and title_no.strip():
+                title_numbers.append(title_no.strip())
+
+            parcel_identifier = parcel_p.get("parcel_id") or parcel_p.get("id")
+            if parcel_identifier is not None:
+                escaped_parcel_id = str(parcel_identifier).replace("'", "''")
+                cql = f"parcel_id = '{escaped_parcel_id}'"
+                if escaped_parcel_id.isdigit():
+                    cql = f"parcel_id = {escaped_parcel_id} OR parcel_id = '{escaped_parcel_id}'"
+                try:
+                    assoc_rows = await self._query_layer_cql(
+                        LINZLayer.PARCEL_TITLE_ASSOCIATION,
+                        cql,
+                        client,
+                        max_results=25,
+                        geometry=False,
+                    )
+                    for row in assoc_rows:
+                        props = row.get("properties", {}) if isinstance(row, dict) else {}
+                        assoc_title = (
+                            props.get("title_no")
+                            or props.get("title_number")
+                            or props.get("title_reference")
+                        )
+                        if isinstance(assoc_title, str):
+                            clean_title = assoc_title.strip()
+                            if clean_title and clean_title not in title_numbers:
+                                title_numbers.append(clean_title)
+                except Exception:
+                    # Association lookups are best-effort and should not fail the summary path.
+                    pass
 
             return {
                 "title": {
-                    "title_no": title_p.get("title_no"),
-                    "land_district": title_p.get("land_district")
+                    "title_no": title_no,
+                    "title_numbers": title_numbers,
+                    "land_district": title_p.get("land_district"),
+                    "type": title_p.get("type"),
                 },
                 "parcel": {
                     "appellation": parcel_p.get("appellation"),
-                    "area": title_p.get("title_area") or parcel_p.get("shape_area"),
-                    "purpose": parcel_p.get("parcel_intent")
+                    "area": parcel_area,
+                    "purpose": parcel_p.get("parcel_intent"),
                 },
                 "address": {
                     "full_address": address_p.get("full_address"),
-                    "territorial_authority": address_p.get("territorial_authority")
+                    "territorial_authority": address_p.get("territorial_authority"),
                 },
                 "location": {
-                    "council": council_p.get("name"),
-                    "ta_id": council_p.get("id")
+                    "council": council_p.get("name") or council_p.get("council"),
+                    "ta_id": council_p.get("id"),
                 },
                 "building": {
-                    "use": details_p.get("use"),
-                    "age": details_p.get("age"),
-                    "risk_class": details_p.get("predominant_use")
+                    "use": building_profile.get("use"),
+                    "age": building_profile.get("age"),
+                    "risk_class": building_profile.get("risk_class"),
+                    "improvements_value": improvements_value,
+                    "has_improvements": has_improvements,
                 },
                 "bridge": {
-                    "building_id": bridge_p.get("building_id"),
-                    "property_id": bridge_p.get("property_id")
-                }
+                    "building_id": bridge_p.get("building_id") or outlines_p.get("building_id"),
+                    "property_id": bridge_p.get("property_id"),
+                },
             }
 
     async def search_addresses(self, query: str, limit: int = 5) -> list[Dict[str, Any]]:
-        """Search addresses with GeocodeServer first, FeatureServer as fallback-only."""
+        """Search addresses via LINZ Vector Query first, geocoder as fallback."""
         normalized = query.strip()
         if len(normalized) < 2:
             return []
 
         request_started = time.monotonic()
-
         cache_key = f"{normalized.lower()}|{limit}"
         cached = self._address_cache.get(cache_key)
         now = time.monotonic()
@@ -537,39 +863,87 @@ class LINZService:
                 return item_id
             return f"{item.get('label')}|{item.get('lat')}|{item.get('lng')}"
 
-        def normalize_geocode_candidate(candidate: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
-            location = candidate.get("location") if isinstance(candidate, dict) else None
-            attrs = candidate.get("attributes") if isinstance(candidate, dict) else None
+        def normalize_vector_feature(feature: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+            props = feature.get("properties", {}) if isinstance(feature, dict) else {}
+            geometry = feature.get("geometry", {}) if isinstance(feature, dict) else {}
 
-            if not isinstance(location, dict):
+            lat = None
+            lng = None
+            if isinstance(geometry, dict):
+                if geometry.get("type") == "Point":
+                    coordinates = geometry.get("coordinates")
+                    if isinstance(coordinates, list) and len(coordinates) >= 2:
+                        lng = coordinates[0]
+                        lat = coordinates[1]
+                if lat is None or lng is None:
+                    # Defensive fallback for non-GeoJSON point responses.
+                    lng = geometry.get("x", lng)
+                    lat = geometry.get("y", lat)
+
+            if lat is None or lng is None:
                 return None
 
-            lng = location.get("x")
-            lat = location.get("y")
-            if lng is None or lat is None:
-                return None
-
-            label = candidate.get("address")
-            if not label and isinstance(attrs, dict):
-                label = attrs.get("LongLabel") or attrs.get("Match_addr")
+            label = props.get("full_address")
+            if not label:
+                number = props.get("full_address_number") or ""
+                road = props.get("full_road_name") or ""
+                label = f"{number} {road}".strip()
             if not label:
                 return None
 
-            ta = None
-            if isinstance(attrs, dict):
-                ta = attrs.get("City") or attrs.get("territorial_authority")
-
-            candidate_id = None
-            if isinstance(attrs, dict):
-                candidate_id = attrs.get("address_id") or attrs.get("Addr_type")
-
             return {
-                "id": str(candidate_id or f"geo-{idx}"),
+                "id": str(props.get("address_id") or f"addr-{idx}"),
                 "label": label,
                 "lat": float(lat),
                 "lng": float(lng),
-                "territorial_authority": ta,
+                "territorial_authority": props.get("territorial_authority"),
             }
+
+        async def fetch_vector_suggestions(include_contains: bool) -> list[Dict[str, Any]]:
+            escaped = normalized.replace("'", "''")
+            cql_prefix = (
+                f"full_address ILIKE '{escaped}%' "
+                f"OR full_road_name ILIKE '{escaped}%'"
+            )
+            cql_contains = (
+                f"full_address ILIKE '%{escaped}%' "
+                f"OR full_road_name ILIKE '%{escaped}%'"
+            )
+
+            client = self._get_address_http_client()
+            prefix_features = await self._query_layer_cql(
+                LINZLayer.ADDRESSES,
+                cql_prefix,
+                client,
+                max_results=limit,
+                geometry=True,
+            )
+
+            contains_features: list[Dict[str, Any]] = []
+            if include_contains and len(normalized) >= 4:
+                contains_features = await self._query_layer_cql(
+                    LINZLayer.ADDRESSES,
+                    cql_contains,
+                    client,
+                    max_results=limit,
+                    geometry=True,
+                )
+
+            suggestions: list[Dict[str, Any]] = []
+            seen: set[str] = set()
+            for idx, feature in enumerate(prefix_features + contains_features):
+                item = normalize_vector_feature(feature, idx)
+                if not item:
+                    continue
+                key = dedupe_key_for_item(item)
+                if key in seen:
+                    continue
+                seen.add(key)
+                suggestions.append(item)
+                if len(suggestions) >= limit:
+                    break
+
+            return suggestions
 
         def build_feature_params(where: str) -> dict[str, str]:
             return {
@@ -581,11 +955,11 @@ class LINZService:
                 "f": "json",
             }
 
-        def normalize_feature(feature: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
-            attrs = feature.get("attributes", {})
-            geometry = feature.get("geometry", {})
-            lng = geometry.get("x")
-            lat = geometry.get("y")
+        def normalize_feature_server_feature(feature: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+            attrs = feature.get("attributes", {}) if isinstance(feature, dict) else {}
+            geometry = feature.get("geometry", {}) if isinstance(feature, dict) else {}
+            lng = geometry.get("x") if isinstance(geometry, dict) else None
+            lat = geometry.get("y") if isinstance(geometry, dict) else None
             if lng is None or lat is None:
                 return None
 
@@ -598,17 +972,14 @@ class LINZService:
                 return None
 
             return {
-                "id": str(attrs.get("address_id") or f"addr-{idx}"),
+                "id": str(attrs.get("address_id") or f"fs-{idx}"),
                 "label": label,
                 "lat": float(lat),
                 "lng": float(lng),
                 "territorial_authority": attrs.get("territorial_authority"),
             }
 
-        async def fetch_feature_fallback(
-            client: httpx.AsyncClient,
-            include_contains: bool = True,
-        ) -> list[Dict[str, Any]]:
+        async def fetch_feature_server_suggestions(include_contains: bool) -> list[Dict[str, Any]]:
             escaped = normalized.replace("'", "''")
             where_prefix = (
                 f"full_address LIKE '{escaped}%' "
@@ -619,44 +990,37 @@ class LINZService:
                 f"OR full_road_name LIKE '%{escaped}%'"
             )
 
-            prefix_result = await client.get(feature_url, params=build_feature_params(where_prefix))
-            prefix_result.raise_for_status()
-            prefix_payload = prefix_result.json()
-            prefix_features = (
-                prefix_payload.get("features", []) if isinstance(prefix_payload, dict) else []
-            )
+            client = self._get_address_http_client()
+            prefix_response = await client.get(feature_url, params=build_feature_params(where_prefix))
+            prefix_response.raise_for_status()
+            prefix_payload = prefix_response.json() if prefix_response.text else {}
+            prefix_features = prefix_payload.get("features", []) if isinstance(prefix_payload, dict) else []
 
             contains_features: list[Dict[str, Any]] = []
             if include_contains and len(normalized) >= 4:
-                contains_result = await client.get(feature_url, params=build_feature_params(where_contains))
-                contains_result.raise_for_status()
-                contains_payload = contains_result.json()
-                contains_features = (
-                    contains_payload.get("features", []) if isinstance(contains_payload, dict) else []
-                )
+                contains_response = await client.get(feature_url, params=build_feature_params(where_contains))
+                contains_response.raise_for_status()
+                contains_payload = contains_response.json() if contains_response.text else {}
+                contains_features = contains_payload.get("features", []) if isinstance(contains_payload, dict) else []
 
-            suggestions: list[Dict[str, Any]] = []
+            results: list[Dict[str, Any]] = []
             seen: set[str] = set()
             for idx, feature in enumerate(prefix_features + contains_features):
-                normalized_feature = normalize_feature(feature, idx)
-                if not normalized_feature:
+                item = normalize_feature_server_feature(feature, idx)
+                if not item:
                     continue
-
-                key = dedupe_key_for_item(normalized_feature)
+                key = dedupe_key_for_item(item)
                 if key in seen:
                     continue
-
                 seen.add(key)
-                suggestions.append(normalized_feature)
-
-                if len(suggestions) >= limit:
+                results.append(item)
+                if len(results) >= limit:
                     break
 
-            return suggestions
+            return results
 
-        try:
+        async def fetch_geocode_suggestions() -> list[Dict[str, Any]]:
             client = self._get_address_http_client()
-
             params = {
                 "f": "json",
                 "singleLine": normalized,
@@ -665,124 +1029,101 @@ class LINZService:
                 "countryCode": "NZL",
             }
 
-            async def fetch_geocode_suggestions() -> list[Dict[str, Any]]:
-                geocode_response = await client.get(geocode_url, params=params)
-                geocode_response.raise_for_status()
-                geocode_payload = geocode_response.json()
+            response = await client.get(geocode_url, params=params)
+            response.raise_for_status()
+            payload = response.json() if response.text else {}
+            candidates = payload.get("candidates", []) if isinstance(payload, dict) else []
 
-                geocode_candidates = []
-                if isinstance(geocode_payload, dict):
-                    geocode_candidates = geocode_payload.get("candidates", [])
-
-                geocode_suggestions: list[Dict[str, Any]] = []
-                seen_geocode: set[str] = set()
-                for idx, candidate in enumerate(geocode_candidates):
-                    normalized_candidate = normalize_geocode_candidate(candidate, idx)
-                    if not normalized_candidate:
-                        continue
-
-                    key = dedupe_key_for_item(normalized_candidate)
-                    if key in seen_geocode:
-                        continue
-
-                    seen_geocode.add(key)
-                    geocode_suggestions.append(normalized_candidate)
-                    if len(geocode_suggestions) >= limit:
-                        break
-
-                return geocode_suggestions
-
-            geocode_task = asyncio.create_task(fetch_geocode_suggestions())
-            prefix_task = asyncio.create_task(fetch_feature_fallback(client, include_contains=False))
-
-            done, pending = await asyncio.wait(
-                {geocode_task, prefix_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            geocode_suggestions: list[Dict[str, Any]] = []
-            prefix_suggestions: list[Dict[str, Any]] = []
-
-            for task in done:
-                try:
-                    result = task.result()
-                except Exception as e:
-                    logger.warning(f"Address primary source failed: {e}")
+            results: list[Dict[str, Any]] = []
+            seen: set[str] = set()
+            for idx, candidate in enumerate(candidates):
+                location = candidate.get("location") if isinstance(candidate, dict) else None
+                if not isinstance(location, dict):
                     continue
 
-                if task is geocode_task:
-                    geocode_suggestions = result
-                else:
-                    prefix_suggestions = result
+                lng = location.get("x")
+                lat = location.get("y")
+                if lng is None or lat is None:
+                    continue
 
-            if geocode_suggestions:
-                for task in pending:
-                    task.cancel()
-                self._address_cache[cache_key] = (now, geocode_suggestions)
+                attrs = candidate.get("attributes") if isinstance(candidate, dict) else {}
+                label = candidate.get("address") or (attrs.get("LongLabel") if isinstance(attrs, dict) else None)
+                if not label:
+                    continue
+
+                item = {
+                    "id": str((attrs or {}).get("address_id") or f"geo-{idx}"),
+                    "label": label,
+                    "lat": float(lat),
+                    "lng": float(lng),
+                    "territorial_authority": (attrs or {}).get("City") if isinstance(attrs, dict) else None,
+                }
+                key = dedupe_key_for_item(item)
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append(item)
+                if len(results) >= limit:
+                    break
+
+            return results
+
+        try:
+            vector_prefix = await fetch_vector_suggestions(include_contains=False)
+            if vector_prefix:
+                self._address_cache[cache_key] = (now, vector_prefix)
                 logger.info(
-                    "Address search served by GeocodeServer in %.0fms",
+                    "Address search served by LINZ vector prefix in %.0fms",
                     (time.monotonic() - request_started) * 1000,
                 )
-                return geocode_suggestions
+                return vector_prefix
 
-            if prefix_suggestions:
-                for task in pending:
-                    task.cancel()
-                self._address_cache[cache_key] = (now, prefix_suggestions)
+            vector_contains = await fetch_vector_suggestions(include_contains=True)
+            if vector_contains:
+                self._address_cache[cache_key] = (now, vector_contains)
+                logger.info(
+                    "Address search served by LINZ vector contains in %.0fms",
+                    (time.monotonic() - request_started) * 1000,
+                )
+                return vector_contains
+
+            feature_prefix = await fetch_feature_server_suggestions(include_contains=False)
+            if feature_prefix:
+                self._address_cache[cache_key] = (now, feature_prefix)
                 logger.info(
                     "Address search served by FeatureServer prefix in %.0fms",
                     (time.monotonic() - request_started) * 1000,
                 )
-                return prefix_suggestions
+                return feature_prefix
 
-            if pending:
-                more_results = await asyncio.gather(*pending, return_exceptions=True)
-                for task, result in zip(pending, more_results):
-                    if isinstance(result, Exception):
-                        logger.warning(f"Address primary source failed: {result}")
-                        continue
-                    if task is geocode_task:
-                        geocode_suggestions = result
-                    else:
-                        prefix_suggestions = result
-
-            if geocode_suggestions:
-                self._address_cache[cache_key] = (now, geocode_suggestions)
+            feature_contains = await fetch_feature_server_suggestions(include_contains=True)
+            if feature_contains:
+                self._address_cache[cache_key] = (now, feature_contains)
                 logger.info(
-                    "Address search served by GeocodeServer in %.0fms",
+                    "Address search served by FeatureServer contains in %.0fms",
                     (time.monotonic() - request_started) * 1000,
                 )
-                return geocode_suggestions
+                return feature_contains
 
-            if prefix_suggestions:
-                self._address_cache[cache_key] = (now, prefix_suggestions)
-                logger.info(
-                    "Address search served by FeatureServer prefix in %.0fms",
-                    (time.monotonic() - request_started) * 1000,
-                )
-                return prefix_suggestions
-
-            # Contains matching is slower; run only after fast paths return empty.
-            fallback_suggestions = await fetch_feature_fallback(client, include_contains=True)
-            self._address_cache[cache_key] = (now, fallback_suggestions)
+            geocode_fallback = await fetch_geocode_suggestions()
+            self._address_cache[cache_key] = (now, geocode_fallback)
             logger.info(
-                "Address search served by contains fallback in %.0fms",
+                "Address search served by geocoder fallback in %.0fms",
                 (time.monotonic() - request_started) * 1000,
             )
-            return fallback_suggestions
+            return geocode_fallback
         except httpx.HTTPError as e:
-            logger.warning(f"GeocodeServer query failed, using fallback: {e}")
+            logger.warning(f"Address search primary query failed: {e}")
             try:
-                client = self._get_address_http_client()
-                fallback_suggestions = await fetch_feature_fallback(client)
-                self._address_cache[cache_key] = (now, fallback_suggestions)
-                return fallback_suggestions
-            except httpx.HTTPError as fallback_error:
-                logger.error(f"Address search fallback failed: {fallback_error}")
-                self._address_cache[cache_key] = (now, [])
-                return []
+                feature_fallback = await fetch_feature_server_suggestions(include_contains=True)
+                if feature_fallback:
+                    self._address_cache[cache_key] = (now, feature_fallback)
+                    return feature_fallback
+                geocode_fallback = await fetch_geocode_suggestions()
+                self._address_cache[cache_key] = (now, geocode_fallback)
+                return geocode_fallback
             except Exception as fallback_error:
-                logger.error(f"Unexpected address search fallback failure: {fallback_error}")
+                logger.error(f"Address search fallback failed: {fallback_error}")
                 self._address_cache[cache_key] = (now, [])
                 return []
         except Exception as e:

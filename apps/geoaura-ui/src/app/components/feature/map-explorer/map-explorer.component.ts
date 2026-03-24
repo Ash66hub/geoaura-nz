@@ -12,12 +12,20 @@ import * as maplibregl from 'maplibre-gl';
 import { LngLatBoundsLike } from 'maplibre-gl';
 import { environment } from '../../../../environments/environment';
 import { FloodService } from '../../../services/flood.service';
-import { AddressSuggestion, PropertyService } from '../../../services/property.service';
+import {
+  AddressSuggestion,
+  PropertyService,
+  PropertySummary,
+} from '../../../services/property.service';
 import { SeismicService } from '../../../services/seismic.service';
 import { CommonModule } from '@angular/common';
 import { GaugeModalComponent } from '../flood-flow-gauge/gauge-modal/gauge-modal.component';
 import { AddressSearchComponent } from '../../shared/address-search/address-search.component';
-import { DetailPanelComponent, DetailPanelModel } from '../detail-panel/detail-panel.component';
+import {
+  DetailPanelComponent,
+  DetailPanelInfoMode,
+  DetailPanelModel,
+} from '../detail-panel/detail-panel.component';
 import { GaugeProperties, LayerItem } from '../../../common/flood-flow-gauge';
 import { of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -100,9 +108,129 @@ export class MapExplorerComponent implements OnInit {
   floodRiversLoading = signal(false);
   seismicDataLoading = signal(false);
   seismicFaultLinesLoading = signal(false);
+  selectedPropertySummary = signal<PropertySummary | null>(null);
+  selectedPropertyCoords = signal<{ lat: number; lng: number } | null>(null);
+  propertyLoading = signal(false);
+  propertyLoadError = signal<string | null>(null);
+  panelInfoMode = signal<DetailPanelInfoMode>('layer');
+  showDetailInfoToggle = computed(
+    () =>
+      !this.isDetailPanelMinimized() &&
+      !!this.selectedPropertySummary() &&
+      this.hasActiveLayerSelection(),
+  );
 
   detailPanelModel = computed<DetailPanelModel | null>(() => {
     try {
+      const preferProperty = this.panelInfoMode() === 'property' || !this.hasActiveLayerSelection();
+      const propertyCoords = this.selectedPropertyCoords();
+      if (propertyCoords && preferProperty) {
+        if (this.propertyLoading()) {
+          return {
+            id: 'property',
+            title: 'Property Details',
+            icon: 'home_pin',
+            color: '#22c55e',
+            sections: [
+              {
+                title: 'Loading Property Details',
+                description: 'Fetching available property metadata for the selected location.',
+                source: 'LINZ',
+                symbol: 'hourglass_top',
+                symbolColor: '#22c55e',
+                loading: true,
+              },
+            ],
+          };
+        }
+
+        const summary = this.selectedPropertySummary();
+        if (summary) {
+          const propertyType = this.derivePropertyType(summary);
+          const address = summary.address?.full_address ?? 'Unknown';
+          const ta = summary.address?.territorial_authority ?? 'Unknown';
+          const titleNo = summary.title?.title_no ?? 'Unknown';
+          const landDistrict = summary.title?.land_district ?? 'Unknown';
+          const titleType = summary.title?.type ?? 'Unknown';
+          const appellation = summary.parcel?.appellation ?? 'Unknown';
+          const area = this.formatPropertyValue(summary.parcel?.area);
+          const parcelPurpose = this.normalizeParcelPurpose(summary.parcel?.purpose);
+          const council = summary.location?.council ?? 'Unknown';
+          const taId = this.formatPropertyValue(summary.location?.ta_id);
+
+          const qvLink = 'https://www.qv.co.nz/property-search/';
+          const homesLink = 'https://homes.co.nz/';
+
+          return {
+            id: 'property',
+            title: 'Property Details',
+            icon: 'home_pin',
+            color: '#22c55e',
+            sections: [
+              {
+                title: 'Property Type',
+                description: `${propertyType}. Title Type: ${titleType}.`,
+                source: 'LINZ',
+                symbol: 'home_work',
+                symbolColor: '#22c55e',
+              },
+              {
+                title: 'Address',
+                description: `${address}. Territorial Authority: ${ta}.`,
+                source: 'LINZ',
+                symbol: 'location_on',
+                symbolColor: '#38bdf8',
+              },
+              {
+                title: 'Title And Parcel',
+                description: `Title: ${titleNo} (${landDistrict}). Appellation: ${appellation}. Area: ${area}. Purpose: ${parcelPurpose}.`,
+                source: 'LINZ',
+                symbol: 'description',
+                symbolColor: '#a78bfa',
+              },
+              {
+                title: 'Building Profile & Valuation',
+                description:
+                  'Building profile fields are currently sparse in source data. Use these external listings for richer property context.',
+                links: [
+                  { label: 'QV Property Search', href: qvLink },
+                  { label: 'Homes.co.nz', href: homesLink },
+                ],
+                source: 'LINZ',
+                symbol: 'apartment',
+                symbolColor: '#f97316',
+              },
+              {
+                title: 'Administrative Area',
+                description: `Council: ${council}. TA ID: ${taId}.`,
+                source: 'LINZ',
+                symbol: 'account_balance',
+                symbolColor: '#facc15',
+              },
+            ],
+          };
+        }
+
+        if (this.propertyLoadError()) {
+          return {
+            id: 'property',
+            title: 'Property Details',
+            icon: 'home_pin',
+            color: '#22c55e',
+            sections: [
+              {
+                title: 'No Property Data Available',
+                description:
+                  this.propertyLoadError() || 'Property details are unavailable for this location.',
+                source: 'LINZ',
+                symbol: 'info',
+                symbolColor: '#94a3b8',
+              },
+            ],
+          };
+        }
+      }
+
       const selId = this.selectedLayerId();
       if (!selId) return null;
 
@@ -128,7 +256,7 @@ export class MapExplorerComponent implements OnInit {
               title: 'Flow Gauges',
               description:
                 'Live telemetered flow gauges actively measuring river height and discharge across the network in real time.',
-              source: 'LINZ & Regional Councils',
+              source: 'LINZ',
               symbolType: 'point-gauge',
               loading: this.floodGaugesLoading(),
             },
@@ -204,6 +332,7 @@ export class MapExplorerComponent implements OnInit {
   private seismicFetchController: AbortController | null = null;
   private lastSeismicRequestKey: string | null = null;
   private seismicLoadCycleId = 0;
+  private propertySummaryRequestId = 0;
   private searchResultMarker: maplibregl.Marker | null = null;
   private boundaryLookupRequestId = 0;
   private boundaryCandidateLayerIds: string[] = [];
@@ -235,15 +364,20 @@ export class MapExplorerComponent implements OnInit {
     const isNowActive = this.isLayerActive(id);
     if (isNowActive) {
       this.selectedLayerId.set(id);
+      this.panelInfoMode.set('layer');
       this.isDetailPanelMinimized.set(false);
     } else if (this.selectedLayerId() === id) {
       const remainingActive = this.layers().filter((l) => l.active);
       if (remainingActive.length > 0) {
         // Fall back to most recently active layer in the remaining list (or just the first one we find)
         this.selectedLayerId.set(remainingActive[remainingActive.length - 1].id);
+        this.panelInfoMode.set('layer');
         this.isDetailPanelMinimized.set(false);
       } else {
         this.selectedLayerId.set(null);
+        if (this.selectedPropertySummary()) {
+          this.panelInfoMode.set('property');
+        }
         this.isDetailPanelMinimized.set(false);
       }
     }
@@ -260,8 +394,18 @@ export class MapExplorerComponent implements OnInit {
     this.isDetailPanelMinimized.update((v) => !v);
   }
 
+  setPanelInfoMode(mode: DetailPanelInfoMode) {
+    this.panelInfoMode.set(mode);
+  }
+
   private isLayerActive(id: string): boolean {
     return this.layers().find((l) => l.id === id)?.active ?? false;
+  }
+
+  private hasActiveLayerSelection(): boolean {
+    const selId = this.selectedLayerId();
+    if (!selId) return false;
+    return this.isLayerActive(selId);
   }
 
   onAddressSelected(suggestion: AddressSuggestion) {
@@ -579,6 +723,8 @@ export class MapExplorerComponent implements OnInit {
   private highlightPropertyBoundaryAt(lat: number, lng: number) {
     if (!this.map) return;
 
+    this.fetchPropertySummary(lat, lng);
+
     const requestId = ++this.boundaryLookupRequestId;
     this.propertyService
       .getParcelGeometry(lat, lng)
@@ -603,6 +749,114 @@ export class MapExplorerComponent implements OnInit {
           features: [feature],
         });
       });
+  }
+
+  private clearSelectedPropertyContext() {
+    this.selectedPropertyCoords.set(null);
+    this.selectedPropertySummary.set(null);
+    this.propertyLoading.set(false);
+    this.propertyLoadError.set(null);
+  }
+
+  private fetchPropertySummary(lat: number, lng: number) {
+    const requestId = ++this.propertySummaryRequestId;
+    this.selectedPropertyCoords.set({ lat, lng });
+    this.panelInfoMode.set('property');
+    this.propertyLoading.set(true);
+    this.propertyLoadError.set(null);
+    this.selectedPropertySummary.set(null);
+    this.isDetailPanelMinimized.set(false);
+
+    this.propertyService
+      .getPropertySummary(lat, lng)
+      .pipe(catchError(() => of(null)))
+      .subscribe((summary) => {
+        if (requestId !== this.propertySummaryRequestId) return;
+
+        this.propertyLoading.set(false);
+        if (!summary) {
+          this.selectedPropertySummary.set(null);
+          this.propertyLoadError.set('No property summary data found for this location.');
+          return;
+        }
+
+        this.selectedPropertySummary.set(summary);
+        this.propertyLoadError.set(null);
+      });
+  }
+
+  private derivePropertyType(summary: PropertySummary): string {
+    const explicitType = summary.title?.type?.trim();
+    if (explicitType && explicitType.toLowerCase() !== 'unknown') {
+      return explicitType;
+    }
+
+    const use = summary.building?.use?.toLowerCase() ?? '';
+    const riskClass = summary.building?.risk_class?.toLowerCase() ?? '';
+    const normalizedPurpose = this.normalizeParcelPurpose(summary.parcel?.purpose);
+    const purpose = normalizedPurpose.toLowerCase();
+    const combined = `${use} ${riskClass} ${purpose}`;
+
+    if (combined.includes('vacant') || combined.includes('bare') || combined.includes('empty')) {
+      return 'Vacant Land';
+    }
+
+    if (
+      combined.includes('multi') ||
+      combined.includes('apartment') ||
+      combined.includes('unit') ||
+      combined.includes('townhouse') ||
+      combined.includes('flat')
+    ) {
+      return 'Multi-unit Residential';
+    }
+
+    if (
+      combined.includes('residential') ||
+      combined.includes('house') ||
+      combined.includes('dwelling') ||
+      combined.includes('home')
+    ) {
+      return 'Residential House';
+    }
+
+    if (
+      combined.includes('commercial') ||
+      combined.includes('retail') ||
+      combined.includes('office')
+    ) {
+      return 'Commercial Property';
+    }
+
+    if (combined.includes('industrial') || combined.includes('warehouse')) {
+      return 'Industrial Property';
+    }
+
+    return summary.building?.use || normalizedPurpose || 'Unknown';
+  }
+
+  private normalizeParcelPurpose(value: string | null | undefined): string {
+    if (!value) {
+      return 'Unknown';
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return 'Unknown';
+    }
+
+    if (trimmed.toUpperCase() === 'DCDB') {
+      return 'Unknown';
+    }
+
+    return trimmed;
+  }
+
+  private formatPropertyValue(value: string | number | null | undefined): string {
+    if (value === null || value === undefined || `${value}`.trim() === '') {
+      return 'Unknown';
+    }
+    return `${value}`;
   }
 
   private highlightBoundaryFromRenderedLayers(lat: number, lng: number): boolean {

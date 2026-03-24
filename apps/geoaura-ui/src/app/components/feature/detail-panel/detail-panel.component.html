@@ -7,6 +7,30 @@
         }}</span>
         <h2>{{ model.title }}</h2>
       </div>
+      @if (showInfoModeToggle && !minimized) {
+        <div class="info-mode-toggle" role="tablist" aria-label="Detail view">
+          <button
+            type="button"
+            class="mode-btn"
+            [class.active]="infoMode === 'layer'"
+            (click)="onInfoModeChange('layer')"
+            role="tab"
+            [attr.aria-selected]="infoMode === 'layer'"
+          >
+            Layer
+          </button>
+          <button
+            type="button"
+            class="mode-btn"
+            [class.active]="infoMode === 'property'"
+            (click)="onInfoModeChange('property')"
+            role="tab"
+            [attr.aria-selected]="infoMode === 'property'"
+          >
+            Property
+          </button>
+        </div>
+      }
       <button
         class="icon-btn close-btn"
         type="button"
@@ -85,24 +109,40 @@
               </div>
             </div>
             <p class="section-desc">{{ section.description }}</p>
-            @if (section.source) {
-              <div class="section-source">
-                <span class="source-label">Source:</span>
-                @if (getSourceHref(section.source); as href) {
+            @if (section.links?.length) {
+              <div class="section-links" aria-label="Property links">
+                @for (link of section.links; track link.href) {
                   <a
-                    class="source-link"
-                    [href]="href"
+                    class="section-link-pill"
+                    [href]="link.href"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    {{ section.source }}
+                    {{ link.label }}
                   </a>
-                } @else {
-                  <span>{{ section.source }}</span>
                 }
               </div>
             }
           </div>
+        }
+
+        @if (getSectionSources(); as sources) {
+          @if (sources.length > 0) {
+            <div class="panel-source-summary">
+              <span class="source-label">Source:</span>
+              <div class="source-items">
+                @for (source of sources; track source) {
+                  @if (getSourceHref(source); as href) {
+                    <a class="source-link" [href]="href" target="_blank" rel="noopener noreferrer">
+                      {{ source }}
+                    </a>
+                  } @else {
+                    <span>{{ source }}</span>
+                  }
+                }
+              </div>
+            </div>
+          }
         }
       }
     </div>

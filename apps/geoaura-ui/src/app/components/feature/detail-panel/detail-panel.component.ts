@@ -1,9 +1,15 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
+export type DetailPanelInfoMode = 'layer' | 'property';
+
 export interface DetailPanelSection {
   title: string;
   description: string;
+  links?: Array<{
+    label: string;
+    href: string;
+  }>;
   source?: string;
   symbol?: string;
   symbolColor?: string;
@@ -36,7 +42,10 @@ export interface DetailPanelModel {
 export class DetailPanelComponent {
   @Input() model: DetailPanelModel | null = null;
   @Input() minimized = false;
+  @Input() showInfoModeToggle = false;
+  @Input() infoMode: DetailPanelInfoMode = 'property';
   @Output() toggleMinimize = new EventEmitter<void>();
+  @Output() infoModeChange = new EventEmitter<DetailPanelInfoMode>();
 
   private readonly sourceLinks: Record<string, string> = {
     geonet: 'https://www.geonet.org.nz/',
@@ -50,6 +59,11 @@ export class DetailPanelComponent {
     this.toggleMinimize.emit();
   }
 
+  onInfoModeChange(mode: DetailPanelInfoMode) {
+    if (mode === this.infoMode) return;
+    this.infoModeChange.emit(mode);
+  }
+
   getSourceHref(source?: string): string | null {
     if (!source) return null;
     const normalized = source.toLowerCase();
@@ -61,5 +75,25 @@ export class DetailPanelComponent {
     }
 
     return null;
+  }
+
+  getSectionSources(): string[] {
+    if (!this.model) return [];
+
+    const orderedSources: string[] = [];
+    const seen = new Set<string>();
+
+    for (const section of this.model.sections) {
+      const source = section.source?.trim();
+      if (!source) continue;
+
+      const key = source.toLowerCase();
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      orderedSources.push(source);
+    }
+
+    return orderedSources;
   }
 }

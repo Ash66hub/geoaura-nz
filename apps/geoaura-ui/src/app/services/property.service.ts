@@ -17,6 +17,36 @@ export interface ParcelGeometryFeature {
   properties: GeoJSON.GeoJsonProperties;
 }
 
+export interface PropertySummary {
+  title?: {
+    title_no?: string | null;
+    land_district?: string | null;
+    type?: string | null;
+  };
+  parcel?: {
+    appellation?: string | null;
+    area?: string | number | null;
+    purpose?: string | null;
+  };
+  address?: {
+    full_address?: string | null;
+    territorial_authority?: string | null;
+  };
+  location?: {
+    council?: string | null;
+    ta_id?: string | number | null;
+  };
+  building?: {
+    use?: string | null;
+    age?: string | number | null;
+    risk_class?: string | null;
+  };
+  bridge?: {
+    building_id?: string | number | null;
+    property_id?: string | number | null;
+  };
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -36,8 +66,8 @@ export class PropertyService {
     });
   }
 
-  getPropertySummary(lat: number, lng: number): Observable<any> {
-    return this.http.get(`${this.baseUrl}/summary`, {
+  getPropertySummary(lat: number, lng: number): Observable<PropertySummary> {
+    return this.http.get<PropertySummary>(`${this.baseUrl}/summary`, {
       params: { lat: lat.toString(), lng: lng.toString() },
     });
   }
