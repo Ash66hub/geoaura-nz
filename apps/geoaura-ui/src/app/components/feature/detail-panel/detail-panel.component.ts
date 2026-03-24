@@ -96,4 +96,27 @@ export class DetailPanelComponent {
 
     return orderedSources;
   }
+
+  getPropertyGoogleMapsLink(): string | null {
+    if (!this.model || this.model.id !== 'property') {
+      return null;
+    }
+
+    const addressSection = this.model.sections.find((section) => section.title === 'Address');
+    const rawDescription = addressSection?.description?.trim();
+    if (!rawDescription) {
+      return null;
+    }
+
+    const primaryAddress = rawDescription
+      .split('Territorial Authority:')[0]
+      .replace(/\.+$/, '')
+      .trim();
+
+    if (!primaryAddress || primaryAddress.toLowerCase() === 'unknown') {
+      return null;
+    }
+
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(primaryAddress)}`;
+  }
 }

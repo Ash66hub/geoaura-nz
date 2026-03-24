@@ -403,6 +403,26 @@
   }
 }
 
+.panel-google-maps-link {
+  margin-top: 4px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: flex-start;
+
+  a {
+    color: #7dd3fc;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: #bae6fd;
+    }
+  }
+}
+
 @keyframes section-spin {
   to {
     transform: rotate(360deg);

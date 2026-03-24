@@ -169,7 +169,7 @@ export class MapExplorerComponent implements OnInit {
             sections: [
               {
                 title: 'Property Type',
-                description: `${propertyType}. Title Type: ${titleType}.`,
+                description: `${propertyType}. `,
                 source: 'LINZ',
                 symbol: 'home_work',
                 symbolColor: '#22c55e',
@@ -183,7 +183,7 @@ export class MapExplorerComponent implements OnInit {
               },
               {
                 title: 'Title And Parcel',
-                description: `Title: ${titleNo} (${landDistrict}). Appellation: ${appellation}. Area: ${area}. Purpose: ${parcelPurpose}.`,
+                description: `Title: ${titleNo} (${landDistrict}). Title Type: ${titleType}. Appellation: ${appellation}. Area: ${area}. Purpose: ${parcelPurpose}.`,
                 source: 'LINZ',
                 symbol: 'description',
                 symbolColor: '#a78bfa',

@@ -126,6 +126,14 @@
           </div>
         }
 
+        @if (getPropertyGoogleMapsLink(); as mapsLink) {
+          <div class="panel-google-maps-link">
+            <a [href]="mapsLink" target="_blank" rel="noopener noreferrer">
+              Open in Google Maps
+            </a>
+          </div>
+        }
+
         @if (getSectionSources(); as sources) {
           @if (sources.length > 0) {
             <div class="panel-source-summary">
