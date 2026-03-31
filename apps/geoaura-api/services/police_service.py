@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 class PoliceService:
@@ -16,17 +16,19 @@ class PoliceService:
         "https://services2.arcgis.com/vKb0s8tBIA3bdocZ/arcgis/rest/services/"
         "Meshblock_2025/FeatureServer/0/query"
     )
-
     def __init__(self):
         # services/ -> geoaura-api/ -> apps/ -> repo root
-        self.csv_path = (
+        nz_police_data_dir = (
             Path(__file__).resolve().parent.parent.parent.parent
             / "data"
             / "raw"
             / "NZPoliceData"
-            / "Download Table_Full Data_data Feb2025_to_Jan2026.csv"
+        )
+        self.csv_path = (
+            nz_police_data_dir / "Download Table_Full Data_data Feb2025_to_Jan2026_with_population.csv"
         )
         self._aggregated_cache: dict[str, dict[str, int]] | None = None
+        self._population_cache: dict[str, float] | None = None
 
     def parse_police_csv(self) -> dict[str, dict[str, int]]:
         """Parse CSV and aggregate victimisations by meshblock and crime type."""
@@ -85,9 +87,14 @@ class PoliceService:
     ) -> dict[str, Any]:
         """Build API payload as a FeatureCollection keyed by meshblock."""
         features: list[dict[str, Any]] = []
+        population_data = self.get_population_data()
 
         for meshblock_id, crime_breakdown in aggregated_police_data.items():
             total_victimisations = sum(crime_breakdown.values())
+            population_estimate = population_data.get(meshblock_id)
+            population_adjusted_rate = None
+            if population_estimate and population_estimate > 0:
+                population_adjusted_rate = (total_victimisations / population_estimate) * 1000
 
             features.append(
                 {
@@ -98,7 +105,8 @@ class PoliceService:
                         "meshblock_code": meshblock_id,
                         "victimisation_sum": total_victimisations,
                         "victimisation_rate": None,
-                        "population_estimate": None,
+                        "victimisation_rate_population": population_adjusted_rate,
+                        "population_estimate": population_estimate,
                         "crime_breakdown": crime_breakdown,
                     },
                 }
@@ -125,6 +133,64 @@ class PoliceService:
         return self._aggregated_cache
 
     @staticmethod
+    def _parse_population_value(value: str) -> Optional[float]:
+        text = str(value).strip()
+        if text in {"", "-999"}:
+            return None
+
+        try:
+            parsed = float(text)
+            if parsed < 0:
+                return None
+            return parsed
+        except (TypeError, ValueError):
+            return None
+
+    def get_population_data(self) -> dict[str, float]:
+        if self._population_cache is not None:
+            return self._population_cache
+
+        population_map: dict[str, float] = {}
+
+        if not self.csv_path.exists():
+            raise FileNotFoundError(f"Police data CSV not found: {self.csv_path}")
+
+        raw = self.csv_path.read_bytes()
+
+        if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+            text = raw.decode("utf-16")
+        else:
+            text = raw.decode("utf-8-sig", errors="replace")
+
+        stream = io.StringIO(text)
+        sample = stream.read(2048)
+        stream.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",\t")
+        except csv.Error:
+            dialect = csv.excel_tab
+
+        reader = csv.DictReader(stream, dialect=dialect)
+        if reader.fieldnames:
+            reader.fieldnames = [name.strip() if name else name for name in reader.fieldnames]
+
+        for row in reader:
+            normalized = {k.strip() if k else k: v for k, v in row.items()}
+            meshblock_raw = str(normalized.get("Meshblock", "")).strip()
+            meshblock = self._normalize_meshblock_code(meshblock_raw)
+            if not meshblock:
+                continue
+
+            total_population = self._parse_population_value(
+                str(normalized.get("ELECTORAL_POPULATION_TOTAL", ""))
+            )
+            if total_population is not None:
+                population_map[meshblock] = total_population
+
+        self._population_cache = population_map
+        return population_map
+
+    @staticmethod
     def _normalize_meshblock_code(code: str) -> str:
         normalized = code.strip()
         if not normalized:
@@ -145,7 +211,8 @@ class PoliceService:
             "geometryType": "esriGeometryEnvelope",
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "MB2025_V1_00,LAND_AREA_SQ_KM",
+            # Request all available attributes so population can be used when present.
+            "outFields": "*",
             "returnGeometry": "true",
             "outSR": "4326",
             "f": "geojson",
@@ -167,6 +234,7 @@ class PoliceService:
         limit: int = 2000,
     ) -> dict[str, Any]:
         aggregated_data = self.get_aggregated_data()
+        population_data = self.get_population_data()
         meshblocks_geojson = self._fetch_meshblocks_for_extent(
             min_lng=min_lng,
             min_lat=min_lat,
@@ -178,7 +246,7 @@ class PoliceService:
         features: list[dict[str, Any]] = []
         for feature in meshblocks_geojson.get("features", []):
             props = feature.get("properties", {}) or {}
-            raw_code = str(props.get("MB2025_V1_00", "")).strip()
+            raw_code = str(props.get("MB2025_V2_00") or props.get("MB2025_V1_00", "")).strip()
             normalized_code = self._normalize_meshblock_code(raw_code)
             if not normalized_code:
                 continue
@@ -190,12 +258,18 @@ class PoliceService:
             total_victimisations = sum(crime_breakdown.values())
             land_area = props.get("LAND_AREA_SQ_KM")
             density = None
+            population_estimate = population_data.get(normalized_code)
+            population_adjusted_rate = None
             try:
                 land_area_val = float(land_area)
                 if land_area_val > 0:
                     density = total_victimisations / land_area_val
             except (TypeError, ValueError):
                 density = None
+
+            if population_estimate and population_estimate > 0:
+                # Standardized as incidents per 1,000 residents.
+                population_adjusted_rate = (total_victimisations / population_estimate) * 1000
 
             features.append(
                 {
@@ -207,7 +281,8 @@ class PoliceService:
                         "meshblock_code_padded": raw_code,
                         "victimisation_sum": total_victimisations,
                         "victimisation_rate": density,
-                        "population_estimate": None,
+                        "victimisation_rate_population": population_adjusted_rate,
+                        "population_estimate": population_estimate,
                         "land_area_sq_km": land_area,
                         "crime_breakdown": crime_breakdown,
                     },

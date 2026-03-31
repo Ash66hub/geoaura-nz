@@ -160,9 +160,9 @@ export class PoliceLayerController {
         source: 'police-meshblocks',
         minzoom: minZoom + 0.01,
         paint: {
-          'line-color': '#374151',
-          'line-width': 0.5,
-          'line-opacity': 0.3,
+          'line-color': '#000000',
+          'line-width': 1.2,
+          'line-opacity': 0.85,
         },
         layout: {
           visibility: active ? 'visible' : 'none',

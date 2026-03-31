@@ -13,6 +13,7 @@ export interface PoliceFeature {
     meshblock_code: string;
     victimisation_sum: number;
     victimisation_rate: number | null;
+    victimisation_rate_population?: number | null;
     crime_breakdown: CrimeBreakdown;
     population_estimate: number | null;
   };

@@ -144,7 +144,9 @@
                   </div>
                   @if (model.meshblockInfo.rate !== undefined) {
                     <div class="stat-item">
-                      <span class="stat-label stat-label-with-help"> Rate: </span>
+                      <span class="stat-label stat-label-with-help"
+                        >Rate (per km<sup>2</sup>):</span
+                      >
                       <span class="stat-value">{{
                         model.meshblockInfo.rate | number: '1.2-2'
                       }}</span>
@@ -163,6 +165,30 @@
                         {{ getRateDescription() }}
                       </div>
                     }
+                  }
+                  <div class="stat-item">
+                    <span class="stat-label">Rate (population adjusted):</span>
+                    @if (model.meshblockInfo.populationAdjustedRate !== undefined) {
+                      <span class="stat-value">{{
+                        model.meshblockInfo.populationAdjustedRate | number: '1.2-2'
+                      }}</span>
+                      <button
+                        type="button"
+                        class="rate-help-btn"
+                        (click)="togglePopulationAdjustedRateInfo()"
+                        [attr.aria-expanded]="showPopulationAdjustedRateInfo"
+                        aria-label="Explain population-adjusted rate"
+                      >
+                        i
+                      </button>
+                    } @else {
+                      <span class="stat-value stat-muted">Not available</span>
+                    }
+                  </div>
+                  @if (showPopulationAdjustedRateInfo) {
+                    <div class="rate-help-popover" role="note">
+                      {{ getPopulationAdjustedRateDescription() }}
+                    </div>
                   }
                 </div>
               </div>

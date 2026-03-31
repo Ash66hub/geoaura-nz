@@ -127,10 +127,19 @@ export class MapExplorerComponent implements OnInit {
   propertyLoadError = signal<string | null>(null);
   panelInfoMode = signal<DetailPanelInfoMode>('layer');
   showDetailInfoToggle = computed(
-    () =>
-      !this.isDetailPanelMinimized() &&
-      !!this.selectedPropertySummary() &&
-      this.hasActiveLayerSelection(),
+    () => {
+      const hasPropertyContext =
+        !!this.selectedPropertySummary() ||
+        !!this.selectedPropertyCoords() ||
+        this.propertyLoading() ||
+        !!this.propertyLoadError();
+
+      return (
+        !this.isDetailPanelMinimized() &&
+        hasPropertyContext &&
+        this.hasActiveLayerSelection()
+      );
+    },
   );
 
   detailPanelModel = computed<DetailPanelModel | null>(() => {
@@ -237,7 +246,7 @@ export class MapExplorerComponent implements OnInit {
             {
               title: 'Incident Density',
               description:
-                'Loads for zoom levels beyond 8. Meshblock-level incident density represented as a choropleth. Click a meshblock to view crime type distribution. The data included is of the period 2025-2026 (12M).',
+                'Loads for zoom levels beyond 8. Meshblock-level incident density represented as a choropleth. Click a meshblock to view crime type distribution. The data included is of the period 2025-2026.',
               source: 'NZ Police',
               symbol: 'pie_chart',
               symbolColor: '#ef4444',
@@ -249,10 +258,20 @@ export class MapExplorerComponent implements OnInit {
             ? {
                 code: `${meshblock['meshblock_code'] ?? 'Unknown'}`,
                 victimisations: Number(meshblock['victimisation_sum'] ?? 0),
+                population:
+                  meshblock['population_estimate'] !== null &&
+                  meshblock['population_estimate'] !== undefined
+                    ? Number(meshblock['population_estimate'])
+                    : undefined,
                 rate:
                   meshblock['victimisation_rate'] !== null &&
                   meshblock['victimisation_rate'] !== undefined
                     ? Number(meshblock['victimisation_rate'])
+                    : undefined,
+                populationAdjustedRate:
+                  meshblock['victimisation_rate_population'] !== null &&
+                  meshblock['victimisation_rate_population'] !== undefined
+                    ? Number(meshblock['victimisation_rate_population'])
                     : undefined,
               }
             : undefined,
@@ -977,10 +996,7 @@ export class MapExplorerComponent implements OnInit {
       'police-incidents-choropleth',
     ] as const;
 
-    const showPopup = (
-      e: maplibregl.MapLayerMouseEvent,
-      layerId: InteractiveLayerId,
-    ) => {
+    const showPopup = (e: maplibregl.MapLayerMouseEvent, layerId: InteractiveLayerId) => {
       const feature = e.features?.[0];
       if (!feature) return;
 

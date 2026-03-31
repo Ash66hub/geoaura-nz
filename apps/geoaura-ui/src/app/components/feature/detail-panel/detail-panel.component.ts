@@ -37,6 +37,7 @@ export interface DetailPanelModel {
     victimisations: number;
     population?: number;
     rate?: number;
+    populationAdjustedRate?: number;
   };
 }
 
@@ -55,6 +56,7 @@ export class DetailPanelComponent {
   @Output() toggleMinimize = new EventEmitter<void>();
   @Output() infoModeChange = new EventEmitter<DetailPanelInfoMode>();
   showRateInfo = false;
+  showPopulationAdjustedRateInfo = false;
 
   private readonly sourceLinks: Record<string, string> = {
     geonet: 'https://www.geonet.org.nz/',
@@ -79,8 +81,16 @@ export class DetailPanelComponent {
     this.showRateInfo = !this.showRateInfo;
   }
 
+  togglePopulationAdjustedRateInfo() {
+    this.showPopulationAdjustedRateInfo = !this.showPopulationAdjustedRateInfo;
+  }
+
   getRateDescription(): string {
-    return 'Rate is incident density: total victimisations in this meshblock divided by land area in square kilometres (incidents per km^2) for Feb 2025 to Jan 2026.';
+    return 'Incident density: total victimisations in this meshblock divided by land area in square kilometres.';
+  }
+
+  getPopulationAdjustedRateDescription(): string {
+    return 'Incidents per 1,000 residents.';
   }
 
   getSourceHref(source?: string): string | null {

@@ -423,6 +423,23 @@
   }
 }
 
+.meshblock-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-muted {
+  color: #94a3b8;
+  font-style: italic;
+}
+
 .stat-label-with-help {
   display: inline-flex;
   align-items: center;
