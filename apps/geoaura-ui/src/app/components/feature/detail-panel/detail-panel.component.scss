@@ -423,6 +423,37 @@
   }
 }
 
+.stat-label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rate-help-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(125, 211, 252, 0.5);
+  background: rgba(14, 116, 144, 0.3);
+  color: #bae6fd;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rate-help-popover {
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  color: #cbd5e1;
+  font-size: 0.78rem;
+}
+
 @keyframes section-spin {
   to {
     transform: rotate(360deg);

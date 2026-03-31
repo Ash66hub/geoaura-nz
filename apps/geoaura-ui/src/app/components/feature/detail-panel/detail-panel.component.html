@@ -128,9 +128,46 @@
 
         @if (getPropertyGoogleMapsLink(); as mapsLink) {
           <div class="panel-google-maps-link">
-            <a [href]="mapsLink" target="_blank" rel="noopener noreferrer">
-              Open in Google Maps
-            </a>
+            <a [href]="mapsLink" target="_blank" rel="noopener noreferrer"> Open in Google Maps </a>
+          </div>
+        }
+
+        @if (model.crimeData && model.crimeData.length > 0) {
+          <div class="detail-section crime-breakdown-section">
+            @if (model.meshblockInfo) {
+              <div class="meshblock-header">
+                <h3>Meshblock {{ model.meshblockInfo.code }}</h3>
+                <div class="meshblock-stats">
+                  <div class="stat-item">
+                    <span class="stat-label">Incidents: </span>
+                    <span class="stat-value">{{ model.meshblockInfo.victimisations }}</span>
+                  </div>
+                  @if (model.meshblockInfo.rate !== undefined) {
+                    <div class="stat-item">
+                      <span class="stat-label stat-label-with-help"> Rate: </span>
+                      <span class="stat-value">{{
+                        model.meshblockInfo.rate | number: '1.2-2'
+                      }}</span>
+                      <button
+                        type="button"
+                        class="rate-help-btn"
+                        (click)="toggleRateInfo()"
+                        [attr.aria-expanded]="showRateInfo"
+                        aria-label="Explain rate"
+                      >
+                        i
+                      </button>
+                    </div>
+                    @if (showRateInfo) {
+                      <div class="rate-help-popover" role="note">
+                        {{ getRateDescription() }}
+                      </div>
+                    }
+                  }
+                </div>
+              </div>
+            }
+            <app-crime-pie-chart [crimeData]="model.crimeData"></app-crime-pie-chart>
           </div>
         }
 

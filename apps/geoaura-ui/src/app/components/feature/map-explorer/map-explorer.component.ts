@@ -26,14 +26,24 @@ import {
   DetailPanelInfoMode,
   DetailPanelModel,
 } from '../detail-panel/detail-panel.component';
+import { PoliceService } from '../../../services/police.service';
 import { GaugeProperties, LayerItem } from '../../../common/flood-flow-gauge';
-import { of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import {
+  getTooltipLines,
+  parseCrimeBreakdown,
+  type InteractiveLayerId,
+} from './map-explorer.utils';
+import { PoliceLayerController } from './police-layer.controller';
+import { SeismicLayerController } from './seismic-layer.controller';
+import { FloodLayerController } from './flood-layer.controller';
+import { PropertySelectionController } from './property-selection.controller';
+import { buildPropertyDetailModel } from './property-detail.model';
 
 const NZ_BOUNDS: LngLatBoundsLike = [
   [165.0, -48.5],
   [179.5, -33.0],
 ];
+const POLICE_MIN_ZOOM = 8;
 
 @Component({
   selector: 'app-map-explorer',
@@ -52,8 +62,11 @@ export class MapExplorerComponent implements OnInit {
   private seismicService = inject(SeismicService);
   private propertyService = inject(PropertyService);
   private ngZone = inject(NgZone);
+  private policeService = inject(PoliceService);
 
   selectedGauge = signal<GaugeProperties | null>(null);
+  selectedPoliceMeshblock = signal<Record<string, unknown> | null>(null);
+  policeDataLoading = signal(false);
 
   layers = signal<LayerItem[]>([
     {
@@ -94,7 +107,7 @@ export class MapExplorerComponent implements OnInit {
       icon: 'local_police',
       active: false,
       colorClass: 'primary',
-      iconColorClass: 'text-slate-500',
+      iconColorClass: 'text-police-red',
     },
   ]);
 
@@ -124,111 +137,15 @@ export class MapExplorerComponent implements OnInit {
     try {
       const preferProperty = this.panelInfoMode() === 'property' || !this.hasActiveLayerSelection();
       const propertyCoords = this.selectedPropertyCoords();
-      if (propertyCoords && preferProperty) {
-        if (this.propertyLoading()) {
-          return {
-            id: 'property',
-            title: 'Property Details',
-            icon: 'home_pin',
-            color: '#22c55e',
-            sections: [
-              {
-                title: 'Loading Property Details',
-                description: 'Fetching available property metadata for the selected location.',
-                source: 'LINZ',
-                symbol: 'hourglass_top',
-                symbolColor: '#22c55e',
-                loading: true,
-              },
-            ],
-          };
-        }
-
-        const summary = this.selectedPropertySummary();
-        if (summary) {
-          const propertyType = this.derivePropertyType(summary);
-          const address = summary.address?.full_address ?? 'Unknown';
-          const ta = summary.address?.territorial_authority ?? 'Unknown';
-          const titleNo = summary.title?.title_no ?? 'Unknown';
-          const landDistrict = summary.title?.land_district ?? 'Unknown';
-          const titleType = summary.title?.type ?? 'Unknown';
-          const appellation = summary.parcel?.appellation ?? 'Unknown';
-          const area = this.formatPropertyValue(summary.parcel?.area);
-          const parcelPurpose = this.normalizeParcelPurpose(summary.parcel?.purpose);
-          const council = summary.location?.council ?? 'Unknown';
-          const taId = this.formatPropertyValue(summary.location?.ta_id);
-
-          const qvLink = 'https://www.qv.co.nz/property-search/';
-          const homesLink = 'https://homes.co.nz/';
-
-          return {
-            id: 'property',
-            title: 'Property Details',
-            icon: 'home_pin',
-            color: '#22c55e',
-            sections: [
-              {
-                title: 'Property Type',
-                description: `${propertyType}. `,
-                source: 'LINZ',
-                symbol: 'home_work',
-                symbolColor: '#22c55e',
-              },
-              {
-                title: 'Address',
-                description: `${address}. Territorial Authority: ${ta}.`,
-                source: 'LINZ',
-                symbol: 'location_on',
-                symbolColor: '#38bdf8',
-              },
-              {
-                title: 'Title And Parcel',
-                description: `Title: ${titleNo} (${landDistrict}). Title Type: ${titleType}. Appellation: ${appellation}. Area: ${area}. Purpose: ${parcelPurpose}.`,
-                source: 'LINZ',
-                symbol: 'description',
-                symbolColor: '#a78bfa',
-              },
-              {
-                title: 'Building Profile & Valuation',
-                description:
-                  'Building profile fields are currently sparse in source data. Use these external listings for richer property context.',
-                links: [
-                  { label: 'QV Property Search', href: qvLink },
-                  { label: 'Homes.co.nz', href: homesLink },
-                ],
-                source: 'LINZ',
-                symbol: 'apartment',
-                symbolColor: '#f97316',
-              },
-              {
-                title: 'Administrative Area',
-                description: `Council: ${council}. TA ID: ${taId}.`,
-                source: 'LINZ',
-                symbol: 'account_balance',
-                symbolColor: '#facc15',
-              },
-            ],
-          };
-        }
-
-        if (this.propertyLoadError()) {
-          return {
-            id: 'property',
-            title: 'Property Details',
-            icon: 'home_pin',
-            color: '#22c55e',
-            sections: [
-              {
-                title: 'No Property Data Available',
-                description:
-                  this.propertyLoadError() || 'Property details are unavailable for this location.',
-                source: 'LINZ',
-                symbol: 'info',
-                symbolColor: '#94a3b8',
-              },
-            ],
-          };
-        }
+      const propertyModel = buildPropertyDetailModel({
+        propertyCoords,
+        preferProperty,
+        propertyLoading: this.propertyLoading(),
+        summary: this.selectedPropertySummary(),
+        propertyLoadError: this.propertyLoadError(),
+      });
+      if (propertyModel) {
+        return propertyModel;
       }
 
       const selId = this.selectedLayerId();
@@ -303,6 +220,43 @@ export class MapExplorerComponent implements OnInit {
             },
           ],
         };
+      } else if (selId === 'police') {
+        const meshblock = this.selectedPoliceMeshblock();
+        const crimeBreakdown = parseCrimeBreakdown(meshblock?.['crime_breakdown']);
+        const crimeData = Object.entries(crimeBreakdown)
+          .map(([label, value]) => ({ label, value: Number(value) || 0 }))
+          .filter((item) => item.value > 0)
+          .sort((a, b) => b.value - a.value);
+
+        return {
+          id: 'police',
+          title: 'Police Incidents',
+          icon: 'local_police',
+          color: '#ef4444',
+          sections: [
+            {
+              title: 'Incident Density',
+              description:
+                'Loads for zoom levels beyond 8. Meshblock-level incident density represented as a choropleth. Click a meshblock to view crime type distribution. The data included is of the period 2025-2026 (12M).',
+              source: 'NZ Police',
+              symbol: 'pie_chart',
+              symbolColor: '#ef4444',
+              loading: this.policeDataLoading(),
+            },
+          ],
+          crimeData,
+          meshblockInfo: meshblock
+            ? {
+                code: `${meshblock['meshblock_code'] ?? 'Unknown'}`,
+                victimisations: Number(meshblock['victimisation_sum'] ?? 0),
+                rate:
+                  meshblock['victimisation_rate'] !== null &&
+                  meshblock['victimisation_rate'] !== undefined
+                    ? Number(meshblock['victimisation_rate'])
+                    : undefined,
+              }
+            : undefined,
+        };
       } else {
         return {
           id: layer.id,
@@ -321,21 +275,14 @@ export class MapExplorerComponent implements OnInit {
 
   private topoLayers: string[] = [];
   private map?: maplibregl.Map;
-  private floodLayersAdded = false;
-  private floodRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  private floodFetchController: AbortController | null = null;
-  private lastFloodRequestKey: string | null = null;
-  private floodLoadCycleId = 0;
-
-  private seismicLayersAdded = false;
-  private seismicRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  private seismicFetchController: AbortController | null = null;
-  private lastSeismicRequestKey: string | null = null;
-  private seismicLoadCycleId = 0;
-  private propertySummaryRequestId = 0;
   private searchResultMarker: maplibregl.Marker | null = null;
-  private boundaryLookupRequestId = 0;
   private boundaryCandidateLayerIds: string[] = [];
+
+  private policeLayerController?: PoliceLayerController;
+  private seismicLayerController?: SeismicLayerController;
+  private floodLayerController?: FloodLayerController;
+  private propertySelectionController?: PropertySelectionController;
+  private tooltipHandlersBound = false;
 
   toggleMapMode(mode: 'satellite' | 'topo') {
     this.currentMapMode.set(mode);
@@ -387,6 +334,9 @@ export class MapExplorerComponent implements OnInit {
     }
     if (id === 'seismic') {
       this.updateSeismicVisibility();
+    }
+    if (id === 'police') {
+      this.updatePoliceVisibility();
     }
   }
 
@@ -475,40 +425,7 @@ export class MapExplorerComponent implements OnInit {
   }
 
   private updateFloodVisibility() {
-    if (!this.map) return;
-    const active = this.isLayerActive('flood');
-
-    if (active && !this.floodLayersAdded) {
-      this.initFloodLayers(this.map);
-      this.floodLayersAdded = true;
-      return;
-    }
-
-    const visibility = active ? 'visible' : 'none';
-    const layers = [
-      'flood-rivers-major-layer',
-      'flood-rivers-minor-layer',
-      'flood-gauges-layer',
-      'flood-gauges-cluster',
-      'flood-gauges-count',
-      'flood-plains-layer', // Coastal plains.
-      'hamilton-hazard-layer', // Hamilton Flood Hazard.
-    ];
-
-    layers.forEach((layerId) => {
-      if (this.map?.getLayer(layerId)) {
-        this.map.setLayoutProperty(layerId, 'visibility', visibility);
-      }
-    });
-
-    if (!active) {
-      if (this.floodFetchController) this.floodFetchController.abort();
-      this.lastFloodRequestKey = null;
-      this.floodOverviewLoading.set(false);
-      this.floodGaugesLoading.set(false);
-      this.floodPlainsLoading.set(false);
-      this.floodRiversLoading.set(false);
-    }
+    this.floodLayerController?.updateVisibility();
   }
 
   ngOnInit() {
@@ -524,12 +441,57 @@ export class MapExplorerComponent implements OnInit {
     });
 
     this.map = map;
+    this.policeLayerController = new PoliceLayerController({
+      map,
+      policeService: this.policeService,
+      isLayerActive: () => this.isLayerActive('police'),
+      bindFeatureTooltips: () => this.bindFeatureTooltips(map),
+      setLoading: (isLoading) => this.policeDataLoading.set(isLoading),
+      clearSelection: () => this.selectedPoliceMeshblock.set(null),
+    });
+    this.seismicLayerController = new SeismicLayerController({
+      map,
+      seismicService: this.seismicService,
+      isLayerActive: () => this.isLayerActive('seismic'),
+      bindFeatureTooltips: () => this.bindFeatureTooltips(map),
+      addSeismicFaultLinesLayer: (active: boolean) => this.addSeismicFaultLinesLayer(map, active),
+      addSeismicEventsLayer: (active: boolean) => this.addSeismicEventsLayer(map, active),
+      setSeismicDataLoading: (loading: boolean) => this.seismicDataLoading.set(loading),
+      setSeismicFaultLinesLoading: (loading: boolean) => this.seismicFaultLinesLoading.set(loading),
+    });
+    this.floodLayerController = new FloodLayerController({
+      map,
+      floodService: this.floodService,
+      isLayerActive: () => this.isLayerActive('flood'),
+      bindFeatureTooltips: () => this.bindFeatureTooltips(map),
+      addRiverNetworkLayer: (active: boolean) => this.addRiverNetworkLayer(map, '', active),
+      addFloodPlainsLayer: (active: boolean) => this.addFloodPlainsLayer(map, '', active),
+      addHamiltonHazardLayer: (active: boolean) => this.addHamiltonHazardLayer(map, active),
+      addFlowGaugesLayer: (active: boolean) => this.addFlowGaugesLayer(map, '', active),
+      setFloodOverviewLoading: (loading: boolean) => this.floodOverviewLoading.set(loading),
+      setFloodGaugesLoading: (loading: boolean) => this.floodGaugesLoading.set(loading),
+      setFloodPlainsLoading: (loading: boolean) => this.floodPlainsLoading.set(loading),
+      setFloodRiversLoading: (loading: boolean) => this.floodRiversLoading.set(loading),
+    });
+    this.propertySelectionController = new PropertySelectionController({
+      map,
+      propertyService: this.propertyService,
+      propertyBoundarySourceId: MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
+      getBoundaryCandidateLayerIds: () => this.boundaryCandidateLayerIds,
+      setSelectedPropertyCoords: (coords) => this.selectedPropertyCoords.set(coords),
+      setPanelInfoModeToProperty: () => this.panelInfoMode.set('property'),
+      setPropertyLoading: (isLoading) => this.propertyLoading.set(isLoading),
+      setPropertyLoadError: (error) => this.propertyLoadError.set(error),
+      setSelectedPropertySummary: (summary) => this.selectedPropertySummary.set(summary),
+      setDetailPanelMinimized: (isMinimized) => this.isDetailPanelMinimized.set(isMinimized),
+    });
     map.addControl(new maplibregl.NavigationControl());
 
     this.zoomLevel.set(Number(map.getZoom().toFixed(1)));
     map.on('zoom', () => {
       this.ngZone.run(() => {
         this.zoomLevel.set(Number(map.getZoom().toFixed(1)));
+        this.syncPoliceLayerZoomGate();
       });
     });
 
@@ -538,9 +500,10 @@ export class MapExplorerComponent implements OnInit {
       this.initPropertyBoundaryLayers(map);
 
       map.on('moveend', () => {
-        this.refreshFloodInView(map);
+        this.refreshFloodInView();
         this.refreshAddressesInView(map);
-        this.refreshSeismicInView(map);
+        this.refreshSeismicInView();
+        this.refreshPoliceInView();
       });
     });
   }
@@ -572,7 +535,8 @@ export class MapExplorerComponent implements OnInit {
     this.boundaryCandidateLayerIds = [];
     style.layers?.forEach((layer) => {
       const id = layer.id.toLowerCase();
-      const sl = ((layer as any)['source-layer'] || '').toLowerCase();
+      const sourceLayer = (layer as { 'source-layer'?: string })['source-layer'];
+      const sl = (sourceLayer || '').toLowerCase();
 
       if (id.startsWith('nz-')) return;
 
@@ -721,235 +685,7 @@ export class MapExplorerComponent implements OnInit {
   }
 
   private highlightPropertyBoundaryAt(lat: number, lng: number) {
-    if (!this.map) return;
-
-    this.fetchPropertySummary(lat, lng);
-
-    const requestId = ++this.boundaryLookupRequestId;
-    this.propertyService
-      .getParcelGeometry(lat, lng)
-      .pipe(catchError(() => of(null)))
-      .subscribe((feature) => {
-        if (!this.map || requestId !== this.boundaryLookupRequestId) return;
-
-        const source = this.map.getSource(
-          MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
-        ) as maplibregl.GeoJSONSource;
-        if (!source) return;
-
-        if (!feature) {
-          if (!this.highlightBoundaryFromRenderedLayers(lat, lng)) {
-            source.setData({ type: 'FeatureCollection', features: [] });
-          }
-          return;
-        }
-
-        source.setData({
-          type: 'FeatureCollection',
-          features: [feature],
-        });
-      });
-  }
-
-  private clearSelectedPropertyContext() {
-    this.selectedPropertyCoords.set(null);
-    this.selectedPropertySummary.set(null);
-    this.propertyLoading.set(false);
-    this.propertyLoadError.set(null);
-  }
-
-  private fetchPropertySummary(lat: number, lng: number) {
-    const requestId = ++this.propertySummaryRequestId;
-    this.selectedPropertyCoords.set({ lat, lng });
-    this.panelInfoMode.set('property');
-    this.propertyLoading.set(true);
-    this.propertyLoadError.set(null);
-    this.selectedPropertySummary.set(null);
-    this.isDetailPanelMinimized.set(false);
-
-    this.propertyService
-      .getPropertySummary(lat, lng)
-      .pipe(catchError(() => of(null)))
-      .subscribe((summary) => {
-        if (requestId !== this.propertySummaryRequestId) return;
-
-        this.propertyLoading.set(false);
-        if (!summary) {
-          this.selectedPropertySummary.set(null);
-          this.propertyLoadError.set('No property summary data found for this location.');
-          return;
-        }
-
-        this.selectedPropertySummary.set(summary);
-        this.propertyLoadError.set(null);
-      });
-  }
-
-  private derivePropertyType(summary: PropertySummary): string {
-    const explicitType = summary.title?.type?.trim();
-    if (explicitType && explicitType.toLowerCase() !== 'unknown') {
-      return explicitType;
-    }
-
-    const use = summary.building?.use?.toLowerCase() ?? '';
-    const riskClass = summary.building?.risk_class?.toLowerCase() ?? '';
-    const normalizedPurpose = this.normalizeParcelPurpose(summary.parcel?.purpose);
-    const purpose = normalizedPurpose.toLowerCase();
-    const combined = `${use} ${riskClass} ${purpose}`;
-
-    if (combined.includes('vacant') || combined.includes('bare') || combined.includes('empty')) {
-      return 'Vacant Land';
-    }
-
-    if (
-      combined.includes('multi') ||
-      combined.includes('apartment') ||
-      combined.includes('unit') ||
-      combined.includes('townhouse') ||
-      combined.includes('flat')
-    ) {
-      return 'Multi-unit Residential';
-    }
-
-    if (
-      combined.includes('residential') ||
-      combined.includes('house') ||
-      combined.includes('dwelling') ||
-      combined.includes('home')
-    ) {
-      return 'Residential House';
-    }
-
-    if (
-      combined.includes('commercial') ||
-      combined.includes('retail') ||
-      combined.includes('office')
-    ) {
-      return 'Commercial Property';
-    }
-
-    if (combined.includes('industrial') || combined.includes('warehouse')) {
-      return 'Industrial Property';
-    }
-
-    return summary.building?.use || normalizedPurpose || 'Unknown';
-  }
-
-  private normalizeParcelPurpose(value: string | null | undefined): string {
-    if (!value) {
-      return 'Unknown';
-    }
-
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return 'Unknown';
-    }
-
-    if (trimmed.toUpperCase() === 'DCDB') {
-      return 'Unknown';
-    }
-
-    return trimmed;
-  }
-
-  private formatPropertyValue(value: string | number | null | undefined): string {
-    if (value === null || value === undefined || `${value}`.trim() === '') {
-      return 'Unknown';
-    }
-    return `${value}`;
-  }
-
-  private highlightBoundaryFromRenderedLayers(lat: number, lng: number): boolean {
-    if (!this.map || this.boundaryCandidateLayerIds.length === 0) return false;
-
-    const pixel = this.map.project([lng, lat]);
-    const candidates = this.map.queryRenderedFeatures(
-      [
-        [pixel.x - 4, pixel.y - 4],
-        [pixel.x + 4, pixel.y + 4],
-      ],
-      {
-        layers: this.boundaryCandidateLayerIds,
-      },
-    );
-
-    const polygons = candidates.filter(
-      (f) => f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon',
-    );
-    const boundary =
-      polygons.find((f) => this.geometryContainsPoint(f.geometry, lng, lat)) ?? polygons[0];
-
-    if (!boundary || !boundary.geometry) {
-      return false;
-    }
-
-    const source = this.map.getSource(
-      MapExplorerComponent.PROPERTY_BOUNDARY_SOURCE_ID,
-    ) as maplibregl.GeoJSONSource;
-    if (!source) return false;
-
-    source.setData({
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          geometry: boundary.geometry,
-          properties: boundary.properties || {},
-        },
-      ],
-    });
-
-    return true;
-  }
-
-  private geometryContainsPoint(
-    geometry: GeoJSON.Geometry | null | undefined,
-    lng: number,
-    lat: number,
-  ): boolean {
-    if (!geometry) return false;
-
-    if (geometry.type === 'Polygon') {
-      return this.polygonContainsPoint(geometry.coordinates, lng, lat);
-    }
-
-    if (geometry.type === 'MultiPolygon') {
-      return geometry.coordinates.some((polygon) => this.polygonContainsPoint(polygon, lng, lat));
-    }
-
-    return false;
-  }
-
-  private polygonContainsPoint(polygon: number[][][], lng: number, lat: number): boolean {
-    if (polygon.length === 0) return false;
-
-    const insideOuter = this.ringContainsPoint(polygon[0], lng, lat);
-    if (!insideOuter) return false;
-
-    for (let i = 1; i < polygon.length; i++) {
-      if (this.ringContainsPoint(polygon[i], lng, lat)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private ringContainsPoint(ring: number[][], lng: number, lat: number): boolean {
-    let inside = false;
-
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][0];
-      const yi = ring[i][1];
-      const xj = ring[j][0];
-      const yj = ring[j][1];
-
-      const intersects =
-        yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi + 1e-15) + xi;
-      if (intersects) inside = !inside;
-    }
-
-    return inside;
+    this.propertySelectionController?.highlightBoundaryAt(lat, lng);
   }
 
   private refreshAddressesInView(map: maplibregl.Map) {
@@ -962,404 +698,28 @@ export class MapExplorerComponent implements OnInit {
     source?.setData(url);
   }
 
-  private initFloodLayers(map: maplibregl.Map) {
-    const active = this.isLayerActive('flood');
-
-    map.addSource('flood-rivers', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    });
-    this.addRiverNetworkLayer(map, '', active);
-
-    map.addSource('flood-plains', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    });
-    this.addFloodPlainsLayer(map, '', active);
-
-    map.addSource('hamilton-hazard', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    });
-    this.addHamiltonHazardLayer(map, active);
-
-    // 2. Flow Gauges Source (Clustered)
-    map.addSource('flood-gauges', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-      cluster: true,
-      clusterMaxZoom: 12,
-      clusterRadius: 50,
-    });
-    this.addFlowGaugesLayer(map, '', active);
-
-    this.bindFeatureTooltips(map);
-
-    this.floodLayersAdded = true;
-    this.refreshFloodInView(map);
-  }
-
-  private refreshFloodInView(map: maplibregl.Map) {
-    if (!this.isLayerActive('flood')) {
-      this.floodOverviewLoading.set(false);
-      this.floodGaugesLoading.set(false);
-      this.floodPlainsLoading.set(false);
-      this.floodRiversLoading.set(false);
-      return;
-    }
-
-    if (this.floodRefreshTimeoutId) {
-      clearTimeout(this.floodRefreshTimeoutId);
-    }
-
-    // Throttle flood refresh so rapid pan/zoom doesn't trigger repeated heavy requests.
-    this.floodRefreshTimeoutId = setTimeout(() => {
-      const bounds = map.getBounds();
-      const zoom = map.getZoom();
-      const requestKey = [
-        bounds.getWest().toFixed(2),
-        bounds.getSouth().toFixed(2),
-        bounds.getEast().toFixed(2),
-        bounds.getNorth().toFixed(2),
-        Math.floor(zoom),
-      ].join(':');
-
-      if (requestKey === this.lastFloodRequestKey) return;
-      this.lastFloodRequestKey = requestKey;
-
-      if (this.floodFetchController) {
-        this.floodFetchController.abort();
-      }
-      this.floodFetchController = new AbortController();
-
-      const cycleId = ++this.floodLoadCycleId;
-
-      this.floodService
-        .getFloodInfoForExtent(
-          bounds.getWest(),
-          bounds.getSouth(),
-          bounds.getEast(),
-          bounds.getNorth(),
-        )
-        .subscribe({
-          next: (info: {
-            gauges_url?: string;
-            rivers_url?: string;
-            plains_url?: string;
-            hamilton_hazard_url?: string;
-          }) => {
-            const signal = this.floodFetchController?.signal;
-
-            if (info.gauges_url) {
-              this.floodGaugesLoading.set(true);
-              fetch(info.gauges_url, { signal })
-                .then((res) => res.json())
-                .then((geojson: GeoJSON.GeoJSON) => {
-                  const source = map.getSource('flood-gauges') as maplibregl.GeoJSONSource;
-                  source?.setData(geojson);
-                })
-                .catch((err) => {
-                  if (err?.name !== 'AbortError') {
-                    console.error('Error fetching gauges GeoJSON:', err);
-                  }
-                })
-                .finally(() => {
-                  if (cycleId === this.floodLoadCycleId) {
-                    this.floodGaugesLoading.set(false);
-                  }
-                });
-            } else {
-              this.floodGaugesLoading.set(false);
-            }
-
-            if (info.rivers_url) {
-              this.floodRiversLoading.set(true);
-              fetch(info.rivers_url, { signal })
-                .then((res) => res.json())
-                .then((geojson: GeoJSON.GeoJSON) => {
-                  const source = map.getSource('flood-rivers') as maplibregl.GeoJSONSource;
-                  source?.setData(geojson);
-                })
-                .catch((err) => {
-                  if (err?.name !== 'AbortError') {
-                    console.error('Error fetching rivers GeoJSON:', err);
-                  }
-                })
-                .finally(() => {
-                  if (cycleId === this.floodLoadCycleId) {
-                    this.floodRiversLoading.set(false);
-                  }
-                });
-            } else {
-              this.floodRiversLoading.set(false);
-            }
-
-            const plainsSource = map.getSource('flood-plains') as maplibregl.GeoJSONSource;
-            const showPlains = zoom >= 7;
-
-            if (!showPlains) {
-              plainsSource?.setData({ type: 'FeatureCollection', features: [] });
-              this.floodPlainsLoading.set(false);
-            } else if (info.plains_url) {
-              this.floodPlainsLoading.set(true);
-              fetch(info.plains_url, { signal })
-                .then((res) => res.json())
-                .then((geojson: GeoJSON.GeoJSON) => {
-                  plainsSource?.setData(geojson);
-                })
-                .catch((err) => {
-                  if (err?.name !== 'AbortError') {
-                    console.error('Error fetching plains GeoJSON:', err);
-                  }
-                })
-                .finally(() => {
-                  if (cycleId === this.floodLoadCycleId) {
-                    this.floodPlainsLoading.set(false);
-                  }
-                });
-            } else {
-              this.floodPlainsLoading.set(false);
-            }
-
-            const hmSource = map.getSource('hamilton-hazard') as maplibregl.GeoJSONSource;
-            const showHamilton = zoom >= 13;
-
-            if (!showHamilton) {
-              hmSource?.setData({ type: 'FeatureCollection', features: [] });
-              this.floodOverviewLoading.set(false);
-            } else if (info.hamilton_hazard_url) {
-              this.floodOverviewLoading.set(true);
-              this.floodService
-                .getHamiltonHazardGeoJson(info.hamilton_hazard_url, signal)
-                .then((geojson: GeoJSON.GeoJSON) => {
-                  hmSource?.setData(geojson);
-                })
-                .catch((err) => {
-                  if (err?.name !== 'AbortError') {
-                    console.error('Error fetching Hamilton Hazard GeoJSON:', err);
-                  }
-                })
-                .finally(() => {
-                  if (cycleId === this.floodLoadCycleId) {
-                    this.floodOverviewLoading.set(false);
-                  }
-                });
-            } else {
-              hmSource?.setData({ type: 'FeatureCollection', features: [] });
-              this.floodOverviewLoading.set(false);
-            }
-          },
-          error: () => {
-            if (cycleId === this.floodLoadCycleId) {
-              this.floodOverviewLoading.set(false);
-              this.floodGaugesLoading.set(false);
-              this.floodPlainsLoading.set(false);
-              this.floodRiversLoading.set(false);
-            }
-          },
-        });
-    }, 250);
+  private refreshFloodInView() {
+    this.floodLayerController?.refreshInView();
   }
 
   private updateSeismicVisibility() {
-    if (!this.map) return;
-    const active = this.isLayerActive('seismic');
-
-    if (active && !this.seismicLayersAdded) {
-      this.initSeismicLayers(this.map);
-      this.seismicLayersAdded = true;
-      return;
-    }
-
-    const visibility = active ? 'visible' : 'none';
-    const layers = [
-      'seismic-events-layer',
-      'seismic-events-cluster',
-      'seismic-events-count',
-      'seismic-fault-lines-layer',
-    ];
-
-    layers.forEach((layerId) => {
-      if (this.map?.getLayer(layerId)) {
-        this.map.setLayoutProperty(layerId, 'visibility', visibility);
-      }
-    });
-
-    if (!active) {
-      if (this.seismicFetchController) this.seismicFetchController.abort();
-      this.lastSeismicRequestKey = null;
-      this.seismicDataLoading.set(false);
-      this.seismicFaultLinesLoading.set(false);
-    }
+    this.seismicLayerController?.updateVisibility();
   }
 
-  private initSeismicLayers(map: maplibregl.Map) {
-    const active = this.isLayerActive('seismic');
-
-    map.addSource('seismic-events', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-      cluster: true,
-      clusterMaxZoom: 8,
-      clusterRadius: 50,
-    });
-
-    map.addSource('seismic-fault-lines', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    });
-
-    this.addSeismicFaultLinesLayer(map, active);
-    this.addSeismicEventsLayer(map, active);
-
-    this.bindFeatureTooltips(map);
-
-    this.seismicLayersAdded = true;
-    this.refreshSeismicInView(map);
+  private updatePoliceVisibility() {
+    this.policeLayerController?.updateVisibility(POLICE_MIN_ZOOM);
   }
 
-  private refreshSeismicInView(map: maplibregl.Map) {
-    if (!this.isLayerActive('seismic')) {
-      this.seismicDataLoading.set(false);
-      this.seismicFaultLinesLoading.set(false);
-      return;
-    }
+  private syncPoliceLayerZoomGate() {
+    this.policeLayerController?.syncZoomGate(POLICE_MIN_ZOOM);
+  }
 
-    if (this.seismicRefreshTimeoutId) {
-      clearTimeout(this.seismicRefreshTimeoutId);
-    }
+  private refreshPoliceInView() {
+    this.policeLayerController?.refreshInView(POLICE_MIN_ZOOM);
+  }
 
-    this.seismicRefreshTimeoutId = setTimeout(() => {
-      const bounds = map.getBounds();
-      const zoom = map.getZoom();
-      const requestKey = [
-        bounds.getWest().toFixed(2),
-        bounds.getSouth().toFixed(2),
-        bounds.getEast().toFixed(2),
-        bounds.getNorth().toFixed(2),
-        Math.floor(zoom),
-      ].join(':');
-
-      if (requestKey === this.lastSeismicRequestKey) return;
-      this.lastSeismicRequestKey = requestKey;
-
-      if (this.seismicFetchController) {
-        this.seismicFetchController.abort();
-      }
-      this.seismicFetchController = new AbortController();
-
-      const loadingId = ++this.seismicLoadCycleId;
-      this.seismicDataLoading.set(true);
-
-      this.seismicService
-        .getSeismicInfoForExtent(
-          bounds.getWest(),
-          bounds.getSouth(),
-          bounds.getEast(),
-          bounds.getNorth(),
-        )
-        .subscribe({
-          next: (info: {
-            url?: string;
-            fault_lines_url?: string;
-            fault_lines_highres_url?: string;
-          }) => {
-            const signal = this.seismicFetchController?.signal;
-            const tasks: Promise<unknown>[] = [];
-
-            if (info.url) {
-              tasks.push(
-                fetch(info.url, { signal })
-                  .then((res) => res.json())
-                  .then((geojson: GeoJSON.GeoJSON) => {
-                    const source = map.getSource('seismic-events') as maplibregl.GeoJSONSource;
-                    source?.setData(geojson);
-                  })
-                  .catch((err) => {
-                    if (err?.name !== 'AbortError') {
-                      console.error('Error fetching seismic GeoJSON:', err);
-                    }
-                  }),
-              );
-            } else {
-              const source = map.getSource('seismic-events') as maplibregl.GeoJSONSource;
-              source?.setData({ type: 'FeatureCollection', features: [] });
-            }
-
-            const faultUrl =
-              zoom >= 13
-                ? info.fault_lines_highres_url || info.fault_lines_url
-                : info.fault_lines_url;
-            const shouldFallbackToRegionalFaults =
-              zoom >= 13 &&
-              !!info.fault_lines_highres_url &&
-              !!info.fault_lines_url &&
-              info.fault_lines_highres_url !== info.fault_lines_url;
-            if (faultUrl) {
-              this.seismicFaultLinesLoading.set(true);
-              tasks.push(
-                fetch(faultUrl, { signal })
-                  .then((res) => res.json())
-                  .then(async (geojson: GeoJSON.GeoJSON) => {
-                    const source = map.getSource('seismic-fault-lines') as maplibregl.GeoJSONSource;
-
-                    const featureCount =
-                      geojson &&
-                      'features' in geojson &&
-                      Array.isArray((geojson as GeoJSON.FeatureCollection).features)
-                        ? (geojson as GeoJSON.FeatureCollection).features.length
-                        : 0;
-
-                    if (
-                      shouldFallbackToRegionalFaults &&
-                      featureCount === 0 &&
-                      info.fault_lines_url
-                    ) {
-                      try {
-                        const fallbackRes = await fetch(info.fault_lines_url, { signal });
-                        const fallbackGeojson = (await fallbackRes.json()) as GeoJSON.GeoJSON;
-                        source?.setData(fallbackGeojson);
-                        return;
-                      } catch (err) {
-                        if ((err as { name?: string })?.name !== 'AbortError') {
-                          console.error('Error fetching fallback fault lines GeoJSON:', err);
-                        }
-                      }
-                    }
-
-                    source?.setData(geojson);
-                  })
-                  .catch((err) => {
-                    if (err?.name !== 'AbortError') {
-                      console.error('Error fetching fault lines GeoJSON:', err);
-                    }
-                  })
-                  .finally(() => {
-                    if (loadingId === this.seismicLoadCycleId) {
-                      this.seismicFaultLinesLoading.set(false);
-                    }
-                  }),
-              );
-            } else {
-              const source = map.getSource('seismic-fault-lines') as maplibregl.GeoJSONSource;
-              source?.setData({ type: 'FeatureCollection', features: [] });
-              this.seismicFaultLinesLoading.set(false);
-            }
-
-            Promise.allSettled(tasks).finally(() => {
-              if (loadingId === this.seismicLoadCycleId) {
-                this.seismicDataLoading.set(false);
-              }
-            });
-          },
-          error: () => {
-            if (loadingId === this.seismicLoadCycleId) {
-              this.seismicDataLoading.set(false);
-              this.seismicFaultLinesLoading.set(false);
-            }
-          },
-        });
-    }, 250);
+  private refreshSeismicInView() {
+    this.seismicLayerController?.refreshInView();
   }
 
   private addSeismicFaultLinesLayer(map: maplibregl.Map, active: boolean) {
@@ -1566,11 +926,10 @@ export class MapExplorerComponent implements OnInit {
       filter: ['has', 'point_count'],
       layout: { visibility: visibility },
       paint: {
-        'circle-color': '#ff9800',
-        'circle-radius': ['step', ['get', 'point_count'], 20, 10, 30, 30, 40],
-        'circle-opacity': 0.8,
-        'circle-stroke-width': 2,
+        'circle-color': '#fb923c',
+        'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 30, 24],
         'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1.5,
       },
     });
 
@@ -1604,12 +963,10 @@ export class MapExplorerComponent implements OnInit {
     });
   }
 
-  private tooltipHandlersBound = false;
-
   private bindFeatureTooltips(map: maplibregl.Map) {
     if (this.tooltipHandlersBound) return;
 
-    const interactiveLayers = [
+    const interactiveLayers: InteractiveLayerId[] = [
       'flood-plains-layer',
       'flood-rivers-major-layer',
       'flood-rivers-minor-layer',
@@ -1617,24 +974,18 @@ export class MapExplorerComponent implements OnInit {
       'hamilton-hazard-layer',
       'seismic-events-layer',
       'seismic-fault-lines-layer',
+      'police-incidents-choropleth',
     ] as const;
 
     const showPopup = (
       e: maplibregl.MapLayerMouseEvent,
-      layerId:
-        | 'flood-plains-layer'
-        | 'flood-rivers-major-layer'
-        | 'flood-rivers-minor-layer'
-        | 'flood-gauges-layer'
-        | 'hamilton-hazard-layer'
-        | 'seismic-events-layer'
-        | 'seismic-fault-lines-layer',
+      layerId: InteractiveLayerId,
     ) => {
       const feature = e.features?.[0];
       if (!feature) return;
 
       const props = (feature.properties || {}) as Record<string, unknown>;
-      const lines = this.getTooltipLines(layerId, props);
+      const lines = getTooltipLines(layerId, props);
 
       if (lines.length > 0) {
         const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: true }).setLngLat(
@@ -1691,6 +1042,15 @@ export class MapExplorerComponent implements OnInit {
           popup.setHTML(lines.join('<br/>'));
         }
 
+        if (layerId === 'police-incidents-choropleth') {
+          this.ngZone.run(() => {
+            this.selectedLayerId.set('police');
+            this.panelInfoMode.set('layer');
+            this.isDetailPanelMinimized.set(false);
+            this.selectedPoliceMeshblock.set(props);
+          });
+        }
+
         popup.addTo(map);
       }
     };
@@ -1706,100 +1066,5 @@ export class MapExplorerComponent implements OnInit {
     });
 
     this.tooltipHandlersBound = true;
-  }
-
-  private getTooltipLines(
-    layerId:
-      | 'flood-plains-layer'
-      | 'flood-rivers-major-layer'
-      | 'flood-rivers-minor-layer'
-      | 'flood-gauges-layer'
-      | 'hamilton-hazard-layer'
-      | 'seismic-events-layer'
-      | 'seismic-fault-lines-layer',
-    props: Record<string, unknown>,
-  ): string[] {
-    if (layerId === 'seismic-fault-lines-layer') {
-      const title = '<b>Active Fault Line</b>';
-      const name = this.pickFirstValue(props, ['name', 'NAME', 'Name', 'FAULT_NAME', 'FaultName']);
-      const className = this.pickFirstValue(props, ['CLASS', 'Class']);
-      const age = this.pickFirstValue(props, ['AGE', 'Age']);
-      const output = [title];
-      if (name) output.push(`Name: ${name}`);
-      if (className) output.push(`Class: ${className}`);
-      if (age) output.push(`Age: ${age}`);
-      return output;
-    }
-
-    if (layerId === 'seismic-events-layer') {
-      const title = '<b>Seismic Event</b>';
-      const mag = this.pickFirstValue(props, ['magnitude']);
-      const depth = this.pickFirstValue(props, ['depth']);
-      const time = this.pickFirstValue(props, ['origintime']);
-      const output = [title];
-      if (mag) output.push(`Magnitude: ${mag}`);
-      if (depth) output.push(`Depth: ${depth} km`);
-      if (time) output.push(`Time: ${new Date(time).toLocaleString()}`);
-      return output;
-    }
-    if (layerId === 'hamilton-hazard-layer') {
-      const title = '<b>Hamilton Flood Hazard</b>';
-      const factor = this.pickFirstValue(props, ['Hazard_Factor']);
-      const event = this.pickFirstValue(props, ['Storm_Event']);
-      const output = [title];
-      if (factor) output.push(`Hazard Factor: ${factor}`);
-      if (event) output.push(`Storm Event: ${event}`);
-      return output;
-    }
-    if (layerId === 'flood-rivers-major-layer' || layerId === 'flood-rivers-minor-layer') {
-      const title = '<b>River Network</b>';
-      const name = this.pickFirstValue(props, ['Rivername', 'name', 'River']);
-      const order = this.pickFirstValue(props, ['Strm_Order', 'stream_order']);
-      const flow = this.pickFirstValue(props, ['q100_reach']);
-      const output = [title];
-      if (name && name.trim() !== '') output.push(`Name: ${name}`);
-      if (order) output.push(`Stream Order: ${order}`);
-      if (flow) output.push(`Q100 Flow: ${flow}`);
-      return output.length > 1 ? output : [title];
-    }
-
-    if (layerId === 'flood-plains-layer') {
-      const title = '<b>Coastal Flood Plain</b>';
-      const detail = this.pickFirstValue(props, [
-        'HazardType',
-        'hazard_type',
-        'Type',
-        'Category',
-        'gridcode',
-      ]);
-      const depth = this.pickFirstValue(props, ['Depth_m', 'depth', 'DEPTH']);
-      const output = [title];
-      if (detail && detail.trim() !== '') output.push(`Class: ${detail}`);
-      if (depth) output.push(`Depth: ${depth} m`);
-      return output.length > 1 ? output : [title];
-    }
-
-    if (layerId === 'flood-gauges-layer') {
-      const title = '<b>Flow Gauge</b>';
-      const name = this.pickFirstValue(props, ['site_name', 'SiteName', 'Location', 'Name']);
-      const owner = this.pickFirstValue(props, ['owner', 'Owner', 'Council']);
-      const output = [title];
-      if (name && name.trim() !== '') output.push(`Name: ${name}`);
-      if (owner) output.push(`Owner: ${owner}`);
-
-      return output;
-    }
-
-    return [];
-  }
-
-  private pickFirstValue(props: Record<string, unknown>, keys: string[]): string | null {
-    for (const key of keys) {
-      const value = props[key];
-      if (value !== undefined && value !== null && `${value}`.trim() !== '') {
-        return `${value}`;
-      }
-    }
-    return null;
   }
 }
