@@ -4,6 +4,11 @@ import { CrimePieChartComponent } from '../../shared/crime-pie-chart/crime-pie-c
 
 export type DetailPanelInfoMode = 'layer' | 'property';
 
+export interface DetailPanelLegendItem {
+  label: string;
+  symbolType: NonNullable<DetailPanelSection['symbolType']>;
+}
+
 export interface DetailPanelSection {
   title: string;
   description: string;
@@ -15,13 +20,20 @@ export interface DetailPanelSection {
   symbol?: string;
   symbolColor?: string;
   loading?: boolean;
+  legendItems?: DetailPanelLegendItem[];
   symbolType?:
     | 'fill-hazard'
     | 'fill-flood'
     | 'point-gauge'
     | 'line-river'
     | 'point-seismic'
-    | 'line-fault';
+    | 'line-fault'
+    | 'line-traffic-bin-1'
+    | 'line-traffic-bin-2'
+    | 'line-traffic-bin-3'
+    | 'line-traffic-bin-4'
+    | 'line-traffic-bin-5'
+    | 'point-traffic-hamilton';
 }
 
 export interface DetailPanelModel {
@@ -66,6 +78,9 @@ export class DetailPanelComponent {
     'nz police':
       'https://www.police.govt.nz/about-us/publications-statistics/data-and-statistics/policedatanz/',
     'waikato regional council': 'https://www.waikatoregion.govt.nz/',
+    'hamilton city council': 'https://hamilton.govt.nz/',
+    nzta: 'https://www.nzta.govt.nz/',
+    'waka kotahi': 'https://www.nzta.govt.nz/',
   };
 
   onToggleMinimize() {

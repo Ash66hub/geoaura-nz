@@ -23,6 +23,16 @@
   box-sizing: border-box;
 }
 
+@media (max-width: 1280px) {
+  .address-search-overlay {
+    top: 1.25rem;
+    left: 24px;
+    transform: none;
+    width: min(30rem, max(15rem, calc(100% - 24px - 24px - 360px - 16px)));
+    padding: 0;
+  }
+}
+
 .layer-control-panel {
   position: absolute;
   top: 130px;
@@ -259,6 +269,8 @@
 @media (max-width: 768px) {
   .address-search-overlay {
     top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
     width: calc(100% - 1rem);
     padding: 0 0.5rem;
   }

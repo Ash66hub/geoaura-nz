@@ -12,6 +12,7 @@ import * as maplibregl from 'maplibre-gl';
 import { LngLatBoundsLike } from 'maplibre-gl';
 import { environment } from '../../../../environments/environment';
 import { FloodService } from '../../../services/flood.service';
+import { TrafficService } from '../../../services/traffic.service';
 import {
   AddressSuggestion,
   PropertyService,
@@ -36,6 +37,7 @@ import {
 import { PoliceLayerController } from './police-layer.controller';
 import { SeismicLayerController } from './seismic-layer.controller';
 import { FloodLayerController } from './flood-layer.controller';
+import { TrafficLayerController } from './traffic-layer.controller';
 import { PropertySelectionController } from './property-selection.controller';
 import { buildPropertyDetailModel } from './property-detail.model';
 
@@ -59,6 +61,7 @@ export class MapExplorerComponent implements OnInit {
 
   private mapContainer = viewChild<ElementRef>('mapContainer');
   private floodService = inject(FloodService);
+  private trafficService = inject(TrafficService);
   private seismicService = inject(SeismicService);
   private propertyService = inject(PropertyService);
   private ngZone = inject(NgZone);
@@ -121,26 +124,22 @@ export class MapExplorerComponent implements OnInit {
   floodRiversLoading = signal(false);
   seismicDataLoading = signal(false);
   seismicFaultLinesLoading = signal(false);
+  trafficDataLoading = signal(false);
+  trafficHamiltonDataLoading = signal(false);
   selectedPropertySummary = signal<PropertySummary | null>(null);
   selectedPropertyCoords = signal<{ lat: number; lng: number } | null>(null);
   propertyLoading = signal(false);
   propertyLoadError = signal<string | null>(null);
   panelInfoMode = signal<DetailPanelInfoMode>('layer');
-  showDetailInfoToggle = computed(
-    () => {
-      const hasPropertyContext =
-        !!this.selectedPropertySummary() ||
-        !!this.selectedPropertyCoords() ||
-        this.propertyLoading() ||
-        !!this.propertyLoadError();
+  showDetailInfoToggle = computed(() => {
+    const hasPropertyContext =
+      !!this.selectedPropertySummary() ||
+      !!this.selectedPropertyCoords() ||
+      this.propertyLoading() ||
+      !!this.propertyLoadError();
 
-      return (
-        !this.isDetailPanelMinimized() &&
-        hasPropertyContext &&
-        this.hasActiveLayerSelection()
-      );
-    },
-  );
+    return !this.isDetailPanelMinimized() && hasPropertyContext && this.hasActiveLayerSelection();
+  });
 
   detailPanelModel = computed<DetailPanelModel | null>(() => {
     try {
@@ -229,6 +228,38 @@ export class MapExplorerComponent implements OnInit {
             },
           ],
         };
+      } else if (selId === 'traffic') {
+        return {
+          id: 'traffic',
+          title: 'Traffic Volume',
+          icon: 'traffic',
+          color: '#0ea5e9',
+          sections: [
+            {
+              title: 'Annual Average Daily Traffic (AADT)',
+              description:
+                'State highway line segments are color-coded by average daily vehicle count. Higher AADT indicates heavier corridor pressure and more frequent congestion.',
+              source: 'NZTA Waka Kotahi',
+              symbolType: 'line-traffic-bin-3',
+              legendItems: [
+                { label: 'Very Low (< 5,000)', symbolType: 'line-traffic-bin-1' },
+                { label: 'Low-Medium (5,000-10,000)', symbolType: 'line-traffic-bin-2' },
+                { label: 'Medium (10,000-20,000)', symbolType: 'line-traffic-bin-3' },
+                { label: 'High (20,000-35,000)', symbolType: 'line-traffic-bin-4' },
+                { label: 'Very High (> 35,000)', symbolType: 'line-traffic-bin-5' },
+              ],
+              loading: this.trafficDataLoading(),
+            },
+            {
+              title: 'Hamilton Traffic Count Sites',
+              description:
+                'Hamilton City count sites are shown as points using the most recent AADT-equivalent annual traffic count available (Year2023, then Year2022, and earlier years as fallback).',
+              source: 'Hamilton City Council',
+              symbolType: 'point-traffic-hamilton',
+              loading: this.trafficHamiltonDataLoading(),
+            },
+          ],
+        };
       } else if (selId === 'police') {
         const meshblock = this.selectedPoliceMeshblock();
         const crimeBreakdown = parseCrimeBreakdown(meshblock?.['crime_breakdown']);
@@ -300,6 +331,7 @@ export class MapExplorerComponent implements OnInit {
   private policeLayerController?: PoliceLayerController;
   private seismicLayerController?: SeismicLayerController;
   private floodLayerController?: FloodLayerController;
+  private trafficLayerController?: TrafficLayerController;
   private propertySelectionController?: PropertySelectionController;
   private tooltipHandlersBound = false;
 
@@ -350,6 +382,9 @@ export class MapExplorerComponent implements OnInit {
 
     if (id === 'flood') {
       this.updateFloodVisibility();
+    }
+    if (id === 'traffic') {
+      this.updateTrafficVisibility();
     }
     if (id === 'seismic') {
       this.updateSeismicVisibility();
@@ -447,6 +482,10 @@ export class MapExplorerComponent implements OnInit {
     this.floodLayerController?.updateVisibility();
   }
 
+  private updateTrafficVisibility() {
+    this.trafficLayerController?.updateVisibility();
+  }
+
   ngOnInit() {
     const container = this.mapContainer()?.nativeElement;
     if (!container) return;
@@ -492,6 +531,15 @@ export class MapExplorerComponent implements OnInit {
       setFloodPlainsLoading: (loading: boolean) => this.floodPlainsLoading.set(loading),
       setFloodRiversLoading: (loading: boolean) => this.floodRiversLoading.set(loading),
     });
+    this.trafficLayerController = new TrafficLayerController({
+      map,
+      trafficService: this.trafficService,
+      isLayerActive: () => this.isLayerActive('traffic'),
+      bindFeatureTooltips: () => this.bindFeatureTooltips(map),
+      addTrafficVolumeLayer: (active: boolean) => this.addTrafficVolumeLayer(map, active),
+      setTrafficLoading: (loading: boolean) => this.trafficDataLoading.set(loading),
+      setHamiltonTrafficLoading: (loading: boolean) => this.trafficHamiltonDataLoading.set(loading),
+    });
     this.propertySelectionController = new PropertySelectionController({
       map,
       propertyService: this.propertyService,
@@ -520,6 +568,7 @@ export class MapExplorerComponent implements OnInit {
 
       map.on('moveend', () => {
         this.refreshFloodInView();
+        this.refreshTrafficInView();
         this.refreshAddressesInView(map);
         this.refreshSeismicInView();
         this.refreshPoliceInView();
@@ -719,6 +768,10 @@ export class MapExplorerComponent implements OnInit {
 
   private refreshFloodInView() {
     this.floodLayerController?.refreshInView();
+  }
+
+  private refreshTrafficInView() {
+    this.trafficLayerController?.refreshInView();
   }
 
   private updateSeismicVisibility() {
@@ -934,6 +987,82 @@ export class MapExplorerComponent implements OnInit {
     });
   }
 
+  private addTrafficVolumeLayer(map: maplibregl.Map, active: boolean) {
+    const trafficValueExpression = [
+      'to-number',
+      [
+        'coalesce',
+        ['get', 'Year2023'],
+        ['get', 'Year2022'],
+        ['get', 'Year2021'],
+        ['get', 'Year2020'],
+        ['get', 'Year2019'],
+        ['get', 'Year2018'],
+        ['get', 'AADT'],
+        ['get', 'ADT'],
+        ['get', 'Average_AADT'],
+        ['get', 'aadt'],
+        ['get', 'adt'],
+        ['get', 'Aadt'],
+      ],
+      -1,
+    ];
+
+    const trafficColorExpression = [
+      'step',
+      trafficValueExpression,
+      '#94a3b8',
+      0,
+      '#22c55e',
+      5000,
+      '#84cc16',
+      10000,
+      '#facc15',
+      20000,
+      '#f97316',
+      35000,
+      '#ef4444',
+    ];
+
+    map.addLayer({
+      id: 'traffic-volume-layer',
+      type: 'line',
+      source: 'traffic-volume',
+      filter: ['==', ['geometry-type'], 'LineString'],
+      layout: {
+        visibility: active ? 'visible' : 'none',
+        'line-join': 'round',
+        'line-cap': 'round',
+      },
+      paint: {
+        'line-color': trafficColorExpression as any,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.2, 10, 2.4, 14, 4],
+        'line-opacity': 0.9,
+      },
+    });
+
+    map.addLayer({
+      id: 'traffic-volume-points-layer',
+      type: 'circle',
+      source: 'traffic-volume',
+      filter: [
+        'all',
+        ['==', ['geometry-type'], 'Point'],
+        ['==', ['get', '__traffic_source'], 'hamilton_points'],
+      ],
+      layout: {
+        visibility: active ? 'visible' : 'none',
+      },
+      paint: {
+        'circle-color': trafficColorExpression as any,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 12, 6, 16, 9],
+        'circle-opacity': 0.85,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1.2,
+      },
+    });
+  }
+
   private addFlowGaugesLayer(map: maplibregl.Map, url: string, active: boolean) {
     const visibility = active ? 'visible' : 'none';
 
@@ -986,6 +1115,8 @@ export class MapExplorerComponent implements OnInit {
     if (this.tooltipHandlersBound) return;
 
     const interactiveLayers: InteractiveLayerId[] = [
+      'traffic-volume-layer',
+      'traffic-volume-points-layer',
       'flood-plains-layer',
       'flood-rivers-major-layer',
       'flood-rivers-minor-layer',

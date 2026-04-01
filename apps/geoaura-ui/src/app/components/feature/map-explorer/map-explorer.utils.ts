@@ -1,6 +1,8 @@
 import type { LngLatBounds } from 'maplibre-gl';
 
 export type InteractiveLayerId =
+  | 'traffic-volume-layer'
+  | 'traffic-volume-points-layer'
   | 'flood-plains-layer'
   | 'flood-rivers-major-layer'
   | 'flood-rivers-minor-layer'
@@ -69,6 +71,47 @@ export function getTooltipLines(
   layerId: InteractiveLayerId,
   props: Record<string, unknown>,
 ): string[] {
+  if (layerId === 'traffic-volume-layer' || layerId === 'traffic-volume-points-layer') {
+    const title = '<b>Traffic Volume (AADT)</b>';
+    const roadName = pickFirstValue(props, [
+      'RoadName',
+      'roadname',
+      'ROAD_NAME',
+      'Site_Name',
+      'Site_Location',
+      'name',
+      'Name',
+      'SegmentDescription',
+      'state_hway',
+    ]);
+    const siteId = pickFirstValue(props, [
+      'Site_Number',
+      'site_id',
+      'SITE_ID',
+      'SiteId',
+      'monitoring_site',
+    ]);
+    const aadt = pickFirstValue(props, [
+      'Year2023',
+      'Year2022',
+      'Year2021',
+      'Year2020',
+      'Year2019',
+      'Year2018',
+      'AADT',
+      'ADT',
+      'Average_AADT',
+      'aadt',
+      'adt',
+      'Aadt',
+    ]);
+    const output = [title];
+    if (roadName) output.push(`Road: ${roadName}`);
+    if (siteId) output.push(`Site: ${siteId}`);
+    if (aadt) output.push(`AADT: ${aadt}`);
+    return output;
+  }
+
   if (layerId === 'police-incidents-choropleth') {
     const title = '<b>Police Incidents</b>';
     const meshblock = pickFirstValue(props, ['meshblock_code']);
@@ -127,7 +170,13 @@ export function getTooltipLines(
 
   if (layerId === 'flood-plains-layer') {
     const title = '<b>Coastal Flood Plain</b>';
-    const detail = pickFirstValue(props, ['HazardType', 'hazard_type', 'Type', 'Category', 'gridcode']);
+    const detail = pickFirstValue(props, [
+      'HazardType',
+      'hazard_type',
+      'Type',
+      'Category',
+      'gridcode',
+    ]);
     const depth = pickFirstValue(props, ['Depth_m', 'depth', 'DEPTH']);
     const output = [title];
     if (detail && detail.trim() !== '') output.push(`Class: ${detail}`);
