@@ -40,6 +40,8 @@ import { FloodLayerController } from './flood-layer.controller';
 import { TrafficLayerController } from './traffic-layer.controller';
 import { PropertySelectionController } from './property-selection.controller';
 import { buildPropertyDetailModel } from './property-detail.model';
+import { RentService, RentStatistics } from '../../../services/rent.service';
+import { RentLayerController } from './rent-layer.controller';
 
 const NZ_BOUNDS: LngLatBoundsLike = [
   [165.0, -48.5],
@@ -66,10 +68,12 @@ export class MapExplorerComponent implements OnInit {
   private propertyService = inject(PropertyService);
   private ngZone = inject(NgZone);
   private policeService = inject(PoliceService);
+  private rentService = inject(RentService);
 
   selectedGauge = signal<GaugeProperties | null>(null);
   selectedPoliceMeshblock = signal<Record<string, unknown> | null>(null);
   policeDataLoading = signal(false);
+  private hoverTimeout: any;
 
   layers = signal<LayerItem[]>([
     {
@@ -98,11 +102,11 @@ export class MapExplorerComponent implements OnInit {
     },
     {
       id: 'landValue',
-      name: 'Land Value',
-      icon: 'money',
+      name: 'Market Rent',
+      icon: 'real_estate_agent',
       active: false,
       colorClass: 'primary',
-      iconColorClass: 'text-slate-500',
+      iconColorClass: 'text-emerald-500',
     },
     {
       id: 'police',
@@ -126,6 +130,10 @@ export class MapExplorerComponent implements OnInit {
   seismicFaultLinesLoading = signal(false);
   trafficDataLoading = signal(false);
   trafficHamiltonDataLoading = signal(false);
+  rentDataLoading = signal(false);
+  selectedRentArea = signal<string | null>(null);
+  rentStatistics = signal<RentStatistics | null>(null);
+  rentStatsLoading = signal(false);
   selectedPropertySummary = signal<PropertySummary | null>(null);
   selectedPropertyCoords = signal<{ lat: number; lng: number } | null>(null);
   propertyLoading = signal(false);
@@ -307,6 +315,27 @@ export class MapExplorerComponent implements OnInit {
               }
             : undefined,
         };
+      } else if (selId === 'landValue') {
+        return {
+          id: 'landValue',
+          title: 'Market Rent',
+          icon: 'real_estate_agent',
+          color: '#10b981',
+          sections: [
+            {
+              title: 'Suburb Rent Statistics',
+              description:
+                'Tenancy Services market rent data aggregated by suburb (Area Definition). Click a suburb on the map to view median weekly rent breakdown by dwelling type and bedrooms. Available beyond zoom level 10.',
+              source: 'Tenancy Services (MBIE)',
+              symbolType: 'fill-hazard',
+              symbolColor: '#10b981',
+              loading: this.rentDataLoading(),
+            },
+          ],
+          rentStatistics: this.rentStatistics(),
+          rentStatsLoading: this.rentStatsLoading(),
+          selectedArea: this.selectedRentArea(),
+        };
       } else {
         return {
           id: layer.id,
@@ -332,6 +361,7 @@ export class MapExplorerComponent implements OnInit {
   private seismicLayerController?: SeismicLayerController;
   private floodLayerController?: FloodLayerController;
   private trafficLayerController?: TrafficLayerController;
+  private rentLayerController?: RentLayerController;
   private propertySelectionController?: PropertySelectionController;
   private tooltipHandlersBound = false;
 
@@ -391,6 +421,9 @@ export class MapExplorerComponent implements OnInit {
     }
     if (id === 'police') {
       this.updatePoliceVisibility();
+    }
+    if (id === 'landValue') {
+      this.updateRentVisibility();
     }
   }
 
@@ -540,6 +573,13 @@ export class MapExplorerComponent implements OnInit {
       setTrafficLoading: (loading: boolean) => this.trafficDataLoading.set(loading),
       setHamiltonTrafficLoading: (loading: boolean) => this.trafficHamiltonDataLoading.set(loading),
     });
+    this.rentLayerController = new RentLayerController({
+      map,
+      rentService: this.rentService,
+      isLayerActive: () => this.isLayerActive('landValue'),
+      bindFeatureTooltips: () => this.bindFeatureTooltips(map),
+      setLoading: (isLoading) => this.rentDataLoading.set(isLoading),
+    });
     this.propertySelectionController = new PropertySelectionController({
       map,
       propertyService: this.propertyService,
@@ -572,6 +612,7 @@ export class MapExplorerComponent implements OnInit {
         this.refreshAddressesInView(map);
         this.refreshSeismicInView();
         this.refreshPoliceInView();
+        this.refreshRentInView();
       });
     });
   }
@@ -788,6 +829,14 @@ export class MapExplorerComponent implements OnInit {
 
   private refreshPoliceInView() {
     this.policeLayerController?.refreshInView(POLICE_MIN_ZOOM);
+  }
+
+  private updateRentVisibility() {
+    this.rentLayerController?.updateVisibility();
+  }
+
+  private refreshRentInView() {
+    this.rentLayerController?.refreshInView();
   }
 
   private refreshSeismicInView() {
@@ -1125,9 +1174,35 @@ export class MapExplorerComponent implements OnInit {
       'seismic-events-layer',
       'seismic-fault-lines-layer',
       'police-incidents-choropleth',
+      'rent-suburbs-fill',
     ] as const;
 
+    // Note: The rent-suburbs-fill layer will get pointer cursor via the general interactiveLayers loop below
+
+    const hoverPopup = new maplibregl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      className: 'hover-tooltip-popup'
+    });
+
+    map.on('mousemove', 'rent-suburbs-fill', (e) => {
+      const feature = e.features?.[0];
+      if (!feature) return;
+      const props = (feature.properties || {}) as Record<string, unknown>;
+      const suburbName = props['name'] || props['locality'] || props['suburb'] || props['NAME'] || props['Locality'];
+      const html = suburbName 
+        ? `<b>${suburbName}</b><br/><span style="color: #64748b; font-size: 0.85em;">Click for rent statistics</span>`
+        : `<span style="color: #64748b; font-size: 0.85em;">Click for rent statistics</span>`;
+      
+      hoverPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+    });
+
+    map.on('mouseleave', 'rent-suburbs-fill', () => {
+      hoverPopup.remove();
+    });
+
     const showPopup = (e: maplibregl.MapLayerMouseEvent, layerId: InteractiveLayerId) => {
+      hoverPopup.remove(); // Hide hover popup when a click popup opens
       const feature = e.features?.[0];
       if (!feature) return;
 
@@ -1155,7 +1230,6 @@ export class MapExplorerComponent implements OnInit {
           btn.onclick = (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            console.log('Gauge Details button clicked!', props);
             this.ngZone.run(() => {
               this.selectedGauge.set(props as unknown as GaugeProperties);
             });
@@ -1189,6 +1263,46 @@ export class MapExplorerComponent implements OnInit {
           popup.setHTML(lines.join('<br/>'));
         }
 
+        if (layerId === 'rent-suburbs-fill') {
+          const name =
+            props['name'] ||
+            props['locality'] ||
+            props['suburb'] ||
+            props['NAME'] ||
+            props['Locality'];
+          const majorName =
+            props['major_name'] || props['territorial_authority'] || props['Major_Name'];
+          const suburbName =
+            majorName && name ? `${majorName} - ${name}` : name || majorName || 'Unknown';
+
+          this.ngZone.run(() => {
+            this.selectedLayerId.set('landValue');
+            this.panelInfoMode.set('layer');
+            this.isDetailPanelMinimized.set(false);
+            this.selectedRentArea.set(String(suburbName));
+            this.fetchRentStats(String(suburbName));
+
+            // Highlight the selected polygon by changing the paint property
+            // We'll use a match expression that matches either 'name', 'locality', or 'suburb' to the original property value
+            // Since suburbName is a computed string, we'll match against the raw name property
+            const rawName = props['name'] || props['locality'] || props['suburb'] || props['NAME'] || props['Locality'];
+            if (rawName) {
+              map.setPaintProperty('rent-suburbs-fill', 'fill-color', [
+                'case',
+                ['any',
+                  ['==', ['get', 'name'], rawName],
+                  ['==', ['get', 'locality'], rawName],
+                  ['==', ['get', 'suburb'], rawName],
+                  ['==', ['get', 'NAME'], rawName],
+                  ['==', ['get', 'Locality'], rawName]
+                ],
+                '#f59e0b', // Selected color (amber 500)
+                '#10b981'  // Default color (emerald 500)
+              ]);
+            }
+          });
+        }
+
         if (layerId === 'police-incidents-choropleth') {
           this.ngZone.run(() => {
             this.selectedLayerId.set('police');
@@ -1213,5 +1327,60 @@ export class MapExplorerComponent implements OnInit {
     });
 
     this.tooltipHandlersBound = true;
+  }
+
+  private fetchRentStats(suburbName: string) {
+    this.rentStatsLoading.set(true);
+    this.rentStatistics.set(null);
+
+    // First, get area definitions to find the ID for this suburb
+    this.rentService.getAreaDefinitions().subscribe({
+      next: (areas) => {
+        // Try exact match first
+        let area = areas.find((a) => a.name.toLowerCase() === suburbName.toLowerCase());
+
+        // If not found, try partial match with the full string
+        if (!area) {
+          area = areas.find(
+            (a) =>
+              a.name.toLowerCase().includes(suburbName.toLowerCase()) ||
+              suburbName.toLowerCase().includes(a.name.toLowerCase()),
+          );
+        }
+
+        // If still not found, and we have a "City - Suburb" format, try just the Suburb
+        if (!area && suburbName.includes(' - ')) {
+          const parts = suburbName.split(' - ');
+          const justSuburb = parts[parts.length - 1].trim();
+
+          area = areas.find(
+            (a) =>
+              a.name.toLowerCase().includes(justSuburb.toLowerCase()) ||
+              justSuburb.toLowerCase().includes(a.name.toLowerCase()),
+          );
+        }
+
+        if (area) {
+          // Use the code (area-definition) for the statistics call as it is more reliable than the label
+          this.rentService.getRentStatistics(area['area-definition']).subscribe({
+            next: (stats) => {
+              this.rentStatistics.set(stats);
+              this.rentStatsLoading.set(false);
+            },
+            error: (err) => {
+              console.error('Rent statistics: error fetching stats', err);
+              this.rentStatsLoading.set(false);
+            },
+          });
+        } else {
+          console.warn('Rent statistics: no matching area found for', suburbName);
+          this.rentStatsLoading.set(false);
+        }
+      },
+      error: (err) => {
+        console.error('Rent statistics: error fetching area definitions', err);
+        this.rentStatsLoading.set(false);
+      },
+    });
   }
 }

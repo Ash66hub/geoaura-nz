@@ -207,6 +207,47 @@
           </div>
         }
 
+        @if (model.id === 'landValue' || model.rentStatistics) {
+          <div class="detail-section rent-stats-section">
+            <div class="rent-stats-header">
+              <h3>Rent Statistics: {{ model.selectedArea || 'Select an area' }}</h3>
+            </div>
+            
+            @if (model.rentStatsLoading) {
+              <div class="stats-table-loading">
+                <span class="section-loading-spinner large-spinner" aria-label="Loading"></span>
+              </div>
+            } @else if (model.rentStatistics && model.rentStatistics.statistics && model.rentStatistics.statistics.length > 0) {
+              <div class="stats-table-container">
+                <table class="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Beds</th>
+                      <th>Median Rent</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (stat of model.rentStatistics.statistics; track $index) {
+                      <tr>
+                        <td>{{ stat['dwelling-type'] }}</td>
+                        <td>{{ stat['num-bedrooms'] }}</td>
+                        <td>{{ stat['median-rent'] | currency:'NZD':'symbol-narrow':'1.0-0' }}</td>
+                        <td>{{ stat['count'] }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            } @else if (!model.rentStatsLoading && model.selectedArea) {
+              <p class="no-data-msg">No rent statistics available for this area.</p>
+            } @else if (!model.selectedArea) {
+              <p class="no-data-msg">Click a suburb on the map to view market rent data.</p>
+            }
+          </div>
+        }
+
         @if (getSectionSources(); as sources) {
           @if (sources.length > 0) {
             <div class="panel-source-summary">
@@ -223,6 +264,13 @@
                 }
               </div>
             </div>
+            <!-- Required as per agreement with MBIE-->
+            @if ((model.id === 'landValue' || model.rentStatistics) && rentSearchDate) {
+              <div class="rent-data-source-info" style="font-size: 0.75rem; color: #94a3b8; margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; display: flex; flex-direction: column; gap: 4px;">
+                <p style="margin: 0;">Data sourced from the Tenancy Services Market Rent Register</p>
+                <p style="margin: 0;">Search performed: {{ rentSearchDate | date:'d MMMM yyyy, h:mm a' }} NZST</p>
+              </div>
+            }
           }
         }
       }

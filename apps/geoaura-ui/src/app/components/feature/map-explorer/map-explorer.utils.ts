@@ -10,7 +10,8 @@ export type InteractiveLayerId =
   | 'hamilton-hazard-layer'
   | 'seismic-events-layer'
   | 'seismic-fault-lines-layer'
-  | 'police-incidents-choropleth';
+  | 'police-incidents-choropleth'
+  | 'rent-suburbs-fill';
 
 export interface ClampedBounds {
   minLng: number;
@@ -182,6 +183,15 @@ export function getTooltipLines(
     if (detail && detail.trim() !== '') output.push(`Class: ${detail}`);
     if (depth) output.push(`Depth: ${depth} m`);
     return output.length > 1 ? output : [title];
+  }
+
+  if (layerId === 'rent-suburbs-fill') {
+    const title = '<b>Market Rent Area</b>';
+    const suburb = pickFirstValue(props, ['locality', 'suburb', 'NAME', 'Locality']);
+    const output = [title];
+    if (suburb) output.push(`Suburb: ${suburb}`);
+    output.push('<i style="color: #10b981;">Rent statistics loaded in panel ➔</i>');
+    return output;
   }
 
   const title = '<b>Flow Gauge</b>';

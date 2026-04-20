@@ -1,6 +1,7 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CrimePieChartComponent } from '../../shared/crime-pie-chart/crime-pie-chart.component';
+import { RentStatistics } from '../../../services/rent.service';
 
 export type DetailPanelInfoMode = 'layer' | 'property';
 
@@ -51,6 +52,9 @@ export interface DetailPanelModel {
     rate?: number;
     populationAdjustedRate?: number;
   };
+  rentStatistics?: RentStatistics | null;
+  rentStatsLoading?: boolean;
+  selectedArea?: string | null;
 }
 
 @Component({
@@ -81,7 +85,21 @@ export class DetailPanelComponent {
     'hamilton city council': 'https://hamilton.govt.nz/',
     nzta: 'https://www.nzta.govt.nz/',
     'waka kotahi': 'https://www.nzta.govt.nz/',
+    'tenancy services (mbie)': 'https://www.tenancy.govt.nz/rent-bond-and-bills/market-rent/',
   };
+
+  private _rentSearchDate: Date | null = null;
+  private _lastStatsRef: any = null;
+
+  get rentSearchDate(): Date | null {
+    if (this.model?.rentStatistics !== this._lastStatsRef) {
+      this._lastStatsRef = this.model?.rentStatistics;
+      if (this.model?.rentStatistics) {
+        this._rentSearchDate = new Date();
+      }
+    }
+    return this._rentSearchDate;
+  }
 
   onToggleMinimize() {
     this.toggleMinimize.emit();
