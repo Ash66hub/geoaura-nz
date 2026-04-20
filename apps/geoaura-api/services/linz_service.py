@@ -902,12 +902,12 @@ class LINZService:
         async def fetch_vector_suggestions(include_contains: bool) -> list[Dict[str, Any]]:
             escaped = normalized.replace("'", "''")
             cql_prefix = (
-                f"full_address ILIKE '{escaped}%' "
-                f"OR full_road_name ILIKE '{escaped}%'"
+                f"full_address LIKE '{escaped}%' "
+                f"OR full_road_name LIKE '{escaped}%'"
             )
             cql_contains = (
-                f"full_address ILIKE '%{escaped}%' "
-                f"OR full_road_name ILIKE '%{escaped}%'"
+                f"full_address LIKE '%{escaped}%' "
+                f"OR full_road_name LIKE '%{escaped}%'"
             )
 
             client = self._get_address_http_client()
@@ -1019,8 +1019,88 @@ class LINZService:
 
             return results
 
+            return results
+
+        async def fetch_photon_suggestions() -> list[Dict[str, Any]]:
+            client = self._get_address_http_client()
+            # Photon search focused on New Zealand
+            params = {
+                "q": normalized,
+                "limit": str(limit),
+                "lang": "en",
+                "lat": "-40.9006",
+                "lon": "174.8860",
+                "bbox": "165.87,-47.65,179.36,-32.55"
+            }
+            photon_url = "https://photon.komoot.io/api/"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+                "Accept": "application/json"
+            }
+
+            try:
+                response = await client.get(photon_url, params=params, headers=headers, timeout=5.0)
+                response.raise_for_status()
+                payload = response.json()
+                features = payload.get("features", [])
+
+                results: list[Dict[str, Any]] = []
+                seen: set[str] = set()
+                for idx, feature in enumerate(features):
+                    props = feature.get("properties", {})
+                    geometry = feature.get("geometry", {})
+                    coords = geometry.get("coordinates", [])
+
+                    if not isinstance(coords, list) or len(coords) < 2:
+                        continue
+
+                    lng, lat = float(coords[0]), float(coords[1])
+
+                    # Build a clean NZ-style address label
+                    name = props.get("name")
+                    street = props.get("street")
+                    housenumber = props.get("housenumber")
+                    city = props.get("city") or props.get("town") or props.get("suburb")
+
+                    label_parts = []
+                    if housenumber and street:
+                        label_parts.append(f"{housenumber} {street}")
+                    elif street:
+                        label_parts.append(street)
+                    elif name:
+                        label_parts.append(name)
+
+                    if city and city not in label_parts:
+                        label_parts.append(city)
+
+                    label = ", ".join(label_parts) if label_parts else (name or "Unknown Address")
+
+                    item = {
+                        "id": f"photon-{props.get('osm_id', idx)}",
+                        "label": label,
+                        "lat": lat,
+                        "lng": lng,
+                        "territorial_authority": city,
+                    }
+
+                    key = dedupe_key_for_item(item)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    results.append(item)
+                    if len(results) >= limit:
+                        break
+                return results
+            except Exception as e:
+                logger.warning(f"Photon search failed, falling back: {e}")
+                return []
+
         async def fetch_geocode_suggestions() -> list[Dict[str, Any]]:
             client = self._get_address_http_client()
+            geocode_url = (
+                "https://locate.linz.govt.nz/arcgis/rest/services/GeocodeServer/"
+                "findAddressCandidates"
+            )
             params = {
                 "f": "json",
                 "singleLine": normalized,
@@ -1069,24 +1149,18 @@ class LINZService:
             return results
 
         try:
-            vector_prefix = await fetch_vector_suggestions(include_contains=False)
-            if vector_prefix:
-                self._address_cache[cache_key] = (now, vector_prefix)
+            # Try Photon first for superior fuzzy matching and autocomplete UX
+            photon_results = await fetch_photon_suggestions()
+            if photon_results:
+                self._address_cache[cache_key] = (now, photon_results)
                 logger.info(
-                    "Address search served by LINZ vector prefix in %.0fms",
+                    "Address search served by Photon (%d results) in %.0fms",
+                    len(photon_results),
                     (time.monotonic() - request_started) * 1000,
                 )
-                return vector_prefix
+                return photon_results
 
-            vector_contains = await fetch_vector_suggestions(include_contains=True)
-            if vector_contains:
-                self._address_cache[cache_key] = (now, vector_contains)
-                logger.info(
-                    "Address search served by LINZ vector contains in %.0fms",
-                    (time.monotonic() - request_started) * 1000,
-                )
-                return vector_contains
-
+            # Fallback to LINZ FeatureServer for high-precision government data
             feature_prefix = await fetch_feature_server_suggestions(include_contains=False)
             if feature_prefix:
                 self._address_cache[cache_key] = (now, feature_prefix)
