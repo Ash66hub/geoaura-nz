@@ -2,6 +2,8 @@ import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CrimePieChartComponent } from '../../shared/crime-pie-chart/crime-pie-chart.component';
 import { RentStatistics } from '../../../services/rent.service';
+import { ReportService } from '../../../services/report.service';
+import { inject } from '@angular/core';
 
 export type DetailPanelInfoMode = 'layer' | 'property';
 
@@ -55,6 +57,7 @@ export interface DetailPanelModel {
   rentStatistics?: RentStatistics | null;
   rentStatsLoading?: boolean;
   selectedArea?: string | null;
+  coords?: { lat: number; lng: number } | null;
 }
 
 @Component({
@@ -71,6 +74,8 @@ export class DetailPanelComponent {
   @Input() infoMode: DetailPanelInfoMode = 'property';
   @Output() toggleMinimize = new EventEmitter<void>();
   @Output() infoModeChange = new EventEmitter<DetailPanelInfoMode>();
+  public reportService = inject(ReportService);
+  
   showRateInfo = false;
   showPopulationAdjustedRateInfo = false;
 
@@ -180,5 +185,24 @@ export class DetailPanelComponent {
     }
 
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(primaryAddress)}`;
+  }
+
+  onGenerateReport() {
+    if (!this.model || this.model.id !== 'property' || !this.model.coords) return;
+    
+    const addressSection = this.model.sections.find((section) => section.title === 'Address');
+    const rawDescription = addressSection?.description?.trim();
+    if (!rawDescription) return;
+
+    const primaryAddress = rawDescription
+      .split('Territorial Authority:')[0]
+      .replace(/\.+$/, '')
+      .trim();
+
+    this.reportService.generateReport(
+      this.model.coords.lat,
+      this.model.coords.lng,
+      primaryAddress
+    ).subscribe();
   }
 }

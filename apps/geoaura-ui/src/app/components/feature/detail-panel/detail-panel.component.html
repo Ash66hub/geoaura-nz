@@ -248,6 +248,35 @@
           </div>
         }
 
+        @if (model.id === 'property' && model.coords) {
+          <div class="detail-section report-generation-section">
+            <div class="section-header">
+              <div class="section-title-wrap">
+                <span class="material-symbols-outlined section-symbol report-icon" aria-hidden="true">
+                  psychology
+                </span>
+                <h3>AI Intelligence Report</h3>
+              </div>
+            </div>
+            <p class="section-desc">
+              Generate an agentic deep-dive report including compliance checks against the NZ Building Code and District Plan.
+            </p>
+            
+            <button 
+              class="generate-report-btn" 
+              [disabled]="reportService.isLoading()"
+              (click)="onGenerateReport()">
+              @if (reportService.isLoading()) {
+                <span class="section-loading-spinner mr-2" aria-label="Generating"></span>
+                Agents Working...
+              } @else {
+                <span class="material-symbols-outlined">auto_awesome</span>
+                Generate Intelligence Report
+              }
+            </button>
+          </div>
+        }
+
         @if (getSectionSources(); as sources) {
           @if (sources.length > 0) {
             <div class="panel-source-summary">

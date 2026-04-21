@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .endpoints import properties, flood, proxy, seismic, police, traffic, rent
+from .endpoints import properties, flood, proxy, seismic, police, traffic, rent, reports
 
 api_router = APIRouter()
 api_router.include_router(properties.router, prefix="/properties", tags=["Properties"])
@@ -9,3 +9,4 @@ api_router.include_router(proxy.router, prefix="/proxy", tags=["Proxy"])
 api_router.include_router(police.router, prefix="/police", tags=["Police Incidents"])
 api_router.include_router(traffic.router, prefix="/traffic", tags=["Traffic Volume"])
 api_router.include_router(rent.router, prefix="/rent", tags=["Market Rent"])
+api_router.include_router(reports.router, prefix="/reports", tags=["AI Reports"])

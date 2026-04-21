@@ -33,6 +33,7 @@ export function buildPropertyDetailModel(
           loading: true,
         },
       ],
+      coords: propertyCoords,
     };
   }
 
@@ -99,6 +100,7 @@ export function buildPropertyDetailModel(
           symbolColor: '#facc15',
         },
       ],
+      coords: propertyCoords,
     };
   }
 
@@ -117,6 +119,7 @@ export function buildPropertyDetailModel(
           symbolColor: '#94a3b8',
         },
       ],
+      coords: propertyCoords,
     };
   }
 
