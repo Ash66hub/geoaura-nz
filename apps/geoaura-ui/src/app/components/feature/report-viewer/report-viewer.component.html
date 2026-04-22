@@ -1,0 +1,99 @@
+@if (report) {
+  <div class="report-overlay" (click)="onClose()" role="dialog" aria-modal="true" aria-label="Property Intelligence Report">
+    <div class="report-container" (click)="$event.stopPropagation()">
+
+      <!-- Header -->
+      <header class="report-header">
+        <div class="header-left">
+          <div class="header-icon-wrap">
+            <span class="material-symbols-outlined">psychology</span>
+          </div>
+          <div>
+            <h1 id="report-title">GeoAura Intelligence Report</h1>
+            <p class="report-address">{{ report.address }}</p>
+            <p class="report-meta">Generated {{ formatDate(report.generated_at) }}</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="overall-risk-badge" [ngClass]="overallRiskClass(report.overall_risk_rating)">
+            <span class="material-symbols-outlined risk-icon">shield</span>
+            <span>{{ riskLabel(report.overall_risk_rating) }}</span>
+          </div>
+          <button class="icon-btn" (click)="onPrint()" title="Print Report" aria-label="Print Report">
+            <span class="material-symbols-outlined">print</span>
+          </button>
+          <button class="icon-btn close-btn" (click)="onClose()" title="Close" aria-label="Close Report">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Body -->
+      <div class="report-body">
+
+        <!-- Executive Summary -->
+        <section class="exec-summary-section">
+          <div class="exec-summary-inner">
+            <span class="material-symbols-outlined exec-icon">summarize</span>
+            <div>
+              <h2>Executive Summary</h2>
+              <p>{{ report.executive_summary }}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Risk grid -->
+        <div class="risk-grid">
+          @for (section of report.sections; track section.id) {
+            <div class="risk-card" [style.--risk-color]="riskColor(section.risk_level)">
+              <div class="risk-card-header">
+                <span class="material-symbols-outlined risk-card-icon">{{ sectionIcon(section) }}</span>
+                <h3>{{ section.title }}</h3>
+                <span class="risk-pill" [style.background]="riskColor(section.risk_level) + '22'"
+                      [style.color]="riskColor(section.risk_level)"
+                      [style.border-color]="riskColor(section.risk_level) + '44'">
+                  {{ riskLabel(section.risk_level) }}
+                </span>
+              </div>
+              <p class="risk-card-content">{{ section.content }}</p>
+              @if (section.key_facts?.length) {
+                <ul class="key-facts-list">
+                  @for (fact of section.key_facts; track $index) {
+                    <li>
+                      <span class="material-symbols-outlined fact-icon">arrow_right</span>
+                      {{ fact }}
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- Recommendation -->
+        <section class="recommendation-section">
+          <div class="recommendation-inner">
+            <span class="material-symbols-outlined rec-icon">lightbulb</span>
+            <div>
+              <h2>Recommendation</h2>
+              <p>{{ report.recommendation }}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Disclaimer + Footer -->
+        <footer class="report-footer">
+          <div class="disclaimer">
+            <span class="material-symbols-outlined">info</span>
+            <p>{{ report.disclaimer }}</p>
+          </div>
+          <div class="footer-brand">
+            <span class="material-symbols-outlined">satellite_alt</span>
+            <span>GeoAura NZ · AI Property Intelligence</span>
+          </div>
+        </footer>
+
+      </div><!-- /.report-body -->
+    </div><!-- /.report-container -->
+  </div><!-- /.report-overlay -->
+}

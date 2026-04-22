@@ -259,11 +259,19 @@
               </div>
             </div>
             <p class="section-desc">
-              Generate an agentic deep-dive report including compliance checks against the NZ Building Code and District Plan.
+              Generate an AI-powered report covering flood risk, seismic hazard, crime profile, market rent, and traffic.
             </p>
-            
-            <button 
-              class="generate-report-btn" 
+
+            @if (reportService.hasError()) {
+              <div class="report-error-msg">
+                <span class="material-symbols-outlined">error_outline</span>
+                Report generation failed. Please try again in some time.
+              </div>
+            }
+
+            <button
+              id="generate-report-btn"
+              class="generate-report-btn"
               [disabled]="reportService.isLoading()"
               (click)="onGenerateReport()">
               @if (reportService.isLoading()) {
