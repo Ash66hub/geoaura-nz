@@ -18,10 +18,11 @@ from services.police_service import PoliceService
 from services.rent_service import RentService
 from services.seismic_service import SeismicService
 from services.traffic_service import TrafficService, TRAFFIC_LINES_URL
+from services.supabase_service import SupabaseService
 
 logger = logging.getLogger(__name__)
 
-_RADIUS_DEG = 0.015  # ~1.5 km bounding box around the property
+_RADIUS_DEG = 0.005  # ~500m bounding box (suburb/meshblock level)
 
 
 def _build_bbox(lat: float, lng: float, radius: float = _RADIUS_DEG) -> list[float]:
@@ -41,6 +42,7 @@ class AgentService:
         self._rent = RentService()
         self._seismic = SeismicService()
         self._traffic = TrafficService()
+        self._supabase = SupabaseService()
 
     # ------------------------------------------------------------------ #
     #  Data-gathering helpers                                              #
@@ -100,13 +102,27 @@ class AgentService:
         return result
 
     async def _fetch_seismic(self, lat: float, lng: float) -> dict[str, Any]:
-        bbox = _build_bbox(lat, lng, radius=0.5)  # wider for seismic context
+        # Tier 1: Fault Rupture (Critical Setback - 50m)
+        bbox_faults = _build_bbox(lat, lng, radius=0.0005)
+        # Tier 2: Soil Stability/Liquefaction Context (500m)
+        bbox_local = _build_bbox(lat, lng, radius=0.005)
+        # Tier 3: Historical Activity & Shaking (20km)
+        bbox_regional = _build_bbox(lat, lng, radius=0.2)
+
         result: dict[str, Any] = {}
         async with httpx.AsyncClient(timeout=20) as client:
-            quake_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox, limit=20)
-            fault_url = self._seismic.get_fault_lines_query_url_with_bbox(*bbox)
+            # Query URLs
+            fault_url = self._seismic.get_fault_lines_query_url_with_bbox(*bbox_faults)
+            quake_local_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox_local, limit=10)
+            quake_regional_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox_regional, limit=20)
 
-            for key, url in [("recent_earthquakes", quake_url), ("fault_lines", fault_url)]:
+            queries = [
+                ("immediate_fault_lines", fault_url),
+                ("local_soil_activity", quake_local_url),
+                ("regional_seismic_history", quake_regional_url)
+            ]
+
+            for key, url in queries:
                 try:
                     resp = await client.get(url)
                     resp.raise_for_status()
@@ -114,7 +130,7 @@ class AgentService:
                     features = data.get("features", [])
                     result[key] = {
                         "feature_count": len(features),
-                        "properties": [f.get("properties", {}) for f in features[:5]],
+                        "properties": [f.get("properties", {}) for f in features[:10]],
                     }
                 except Exception as exc:
                     logger.warning("Seismic fetch failed for %s: %s", key, exc)
@@ -201,6 +217,43 @@ class AgentService:
         return result
 
     # ------------------------------------------------------------------ #
+    #  RAG / Knowledge retrieval                                         #
+    # ------------------------------------------------------------------ #
+
+    def _get_query_embedding(self, text: str) -> list[float]:
+        try:
+            result = self._client.models.embed_content(
+                model="models/gemini-embedding-2",
+                contents=text,
+                config=genai_types.EmbedContentConfig(
+                    task_type="RETRIEVAL_QUERY",
+                    output_dimensionality=768
+                )
+            )
+            return result.embeddings[0].values
+        except Exception as exc:
+            logger.error(f"Error generating query embedding: {exc}")
+            return []
+
+    async def _fetch_rag_context(self, queries: list[str]) -> str:
+        """
+        Retrieves relevant building code snippets for the given queries.
+        """
+        all_snippets = []
+        for q in queries:
+            emb = self._get_query_embedding(q)
+            if not emb:
+                continue
+            
+            matches = self._supabase.search_regulatory_documents(emb, match_count=2)
+            for m in matches:
+                content = m.get("content", "")
+                if content not in all_snippets:
+                    all_snippets.append(content)
+        
+        return "\n\n---\n\n".join(all_snippets)
+
+    # ------------------------------------------------------------------ #
     #  Report synthesis                                                    #
     # ------------------------------------------------------------------ #
 
@@ -229,6 +282,17 @@ class AgentService:
 
         crime_data = self._fetch_crime(lat, lng)
 
+        # RAG: Fetch relevant building code snippets based on detected risks
+        rag_queries = ["general property compliance"]
+        if flood_data.get("coastal_plains", {}).get("feature_count", 0) > 0 or \
+           flood_data.get("hamilton_flood_hazard", {}).get("feature_count", 0) > 0:
+            rag_queries.append("Surface water drainage and flood protection E1")
+        
+        if seismic_data.get("fault_lines", {}).get("feature_count", 0) > 0:
+            rag_queries.append("Structural safety and earthquake resilience B1")
+            
+        rag_context = await self._fetch_rag_context(rag_queries)
+
         prompt = f"""
 You are GeoAura NZ – an expert property intelligence analyst. Generate a structured LIM-precursor report for:
 
@@ -256,6 +320,10 @@ If a data section shows no features or an error, explicitly state "No data avail
 
 ## 6. TRAFFIC VOLUME (NZTA Waka Kotahi)
 {json.dumps(traffic_data, indent=2, default=str)}
+
+---
+## 7. RELEVANT NZ BUILDING CODE & DISTRICT PLAN SNIPPETS (RAG)
+{rag_context}
 ---
 
 OUTPUT FORMAT – Return valid JSON only, with exactly this structure:
@@ -313,6 +381,14 @@ OUTPUT FORMAT – Return valid JSON only, with exactly this structure:
       "risk_level": "low | medium | high | unknown",
       "content": "string",
       "key_facts": ["string"]
+    }},
+    {{
+      "id": "regulatory",
+      "title": "Regulatory & Building Code",
+      "icon": "gavel",
+      "risk_level": "low | medium | high | unknown",
+      "content": "string – explain how the building code and district plan snippets apply to the specific risks identified (e.g. earthquake or flood mitigation)",
+      "key_facts": ["string – reference specific code clauses like E1, B1, etc."]
     }}
   ],
   "overall_risk_rating": "low | medium | high",
