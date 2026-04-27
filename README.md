@@ -14,3 +14,23 @@ Backend: FastAPI (Python 3.11, LangGraph for Agentic Workflows)
 AI Brain: Gemini 1.5 Flash (via Google AI SDK)
 
 Spatial Data: PostGIS, NIWA (Floods), GNS/GeoNet (Seismic), LINZ (Parcels)
+
+## Backend Dependencies
+The following libraries are required to run the GeoAura API:
+
+```text
+fastapi
+uvicorn
+httpx
+google-genai
+python-dotenv
+supabase
+pydantic-settings
+pydantic
+python-multipart
+jinja2
+bcrypt
+pyjwt
+python-jose[cryptography]
+passlib[bcrypt]
+```

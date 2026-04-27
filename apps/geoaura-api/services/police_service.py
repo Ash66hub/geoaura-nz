@@ -4,6 +4,7 @@ import json
 import ssl
 import urllib.parse
 import urllib.request
+import httpx
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
@@ -16,6 +17,11 @@ class PoliceService:
         "https://services2.arcgis.com/vKb0s8tBIA3bdocZ/arcgis/rest/services/"
         "Meshblock_2025/FeatureServer/0/query"
     )
+    REMOTE_CSV_URL = (
+        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/"
+        "NZPoliceData/Download%20Table_Full%20Data_data%20Feb2025_to_Jan2026_with_population.csv"
+    )
+
     def __init__(self):
         # services/ -> geoaura-api/ -> apps/ -> repo root
         nz_police_data_dir = (
@@ -30,21 +36,27 @@ class PoliceService:
         self._aggregated_cache: dict[str, dict[str, int]] | None = None
         self._population_cache: dict[str, float] | None = None
 
-    def parse_police_csv(self) -> dict[str, dict[str, int]]:
-        """Parse CSV and aggregate victimisations by meshblock and crime type."""
-        data: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-
-        if not self.csv_path.exists():
-            raise FileNotFoundError(f"Police data CSV not found: {self.csv_path}")
-
-        raw = self.csv_path.read_bytes()
+    def _get_csv_text(self) -> str:
+        """Get CSV content from local file or remote URL."""
+        if self.csv_path.exists():
+            raw = self.csv_path.read_bytes()
+        else:
+            # Fetch from Supabase if local file is gone
+            with httpx.Client(timeout=60.0) as client:
+                response = client.get(self.REMOTE_CSV_URL)
+                response.raise_for_status()
+                raw = response.content
 
         # NZ Police export is typically UTF-16LE with BOM, but keep fallback for UTF-8 variants.
         if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
-            text = raw.decode("utf-16")
+            return raw.decode("utf-16")
         else:
-            text = raw.decode("utf-8-sig", errors="replace")
+            return raw.decode("utf-8-sig", errors="replace")
 
+    def parse_police_csv(self) -> dict[str, dict[str, int]]:
+        """Parse CSV and aggregate victimisations by meshblock and crime type."""
+        data: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        text = self._get_csv_text()
         stream = io.StringIO(text)
         sample = stream.read(2048)
         stream.seek(0)
@@ -151,17 +163,7 @@ class PoliceService:
             return self._population_cache
 
         population_map: dict[str, float] = {}
-
-        if not self.csv_path.exists():
-            raise FileNotFoundError(f"Police data CSV not found: {self.csv_path}")
-
-        raw = self.csv_path.read_bytes()
-
-        if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
-            text = raw.decode("utf-16")
-        else:
-            text = raw.decode("utf-8-sig", errors="replace")
-
+        text = self._get_csv_text()
         stream = io.StringIO(text)
         sample = stream.read(2048)
         stream.seek(0)

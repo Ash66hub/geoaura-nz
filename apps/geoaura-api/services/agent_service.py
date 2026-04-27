@@ -300,16 +300,18 @@ class AgentService:
             plan_context = await self._fetch_rag_context(plan_queries, doc_type="district_plan")
             rag_context += "\n\n### HAMILTON DISTRICT PLAN INSIGHTS:\n" + plan_context
 
-        persona = "expert property investment analyst" if user_type == "buyer" else "lifestyle and rental market analyst"
-        focus_area = "long-term structural integrity, capital risk, and regulatory compliance" if user_type == "buyer" else "living standards, neighborhood safety, and rental value"
+        persona = "friendly and helpful property guide"
+        focus_area = "making the data easy to understand and highlighting what truly matters for your future home" if user_type == "buyer" else "your daily lifestyle, safety, and whether the area is a good fit for you"
 
         prompt = f"""
-You are GeoAura NZ – an {persona}. Generate a structured LIM-precursor report for a potential {user_type}:
+You are GeoAura NZ – a {persona}. Your goal is to explain property data in simple, plain English for a potential {user_type}.
 
 ADDRESS: {address}
 COORDINATES: {lat:.6f}, {lng:.6f}
 
-Focus specifically on {focus_area} from the perspective of a {user_type}.
+Focus specifically on {focus_area}. 
+
+IMPORTANT: Avoid overly technical jargon. If you must mention a technical term (like 'liquefaction' or 'AADT'), briefly explain what it means in a way a layman would understand.
 
 Use ONLY the data provided below. Do not invent, embellish, or make assumptions beyond the data.
 If a data section shows no features or an error, explicitly state "No data available" rather than omitting the section.
