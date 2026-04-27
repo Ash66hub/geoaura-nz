@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common';
 import { CrimePieChartComponent } from '../../shared/crime-pie-chart/crime-pie-chart.component';
 import { RentStatistics } from '../../../services/rent.service';
 import { ReportService } from '../../../services/report.service';
-import { inject } from '@angular/core';
+import { ReportSelectorComponent } from '../report-selector/report-selector.component';
+import { inject, signal } from '@angular/core';
 
 export type DetailPanelInfoMode = 'layer' | 'property';
 
@@ -63,7 +64,7 @@ export interface DetailPanelModel {
 @Component({
   selector: 'app-detail-panel',
   standalone: true,
-  imports: [CommonModule, CrimePieChartComponent],
+  imports: [CommonModule, CrimePieChartComponent, ReportSelectorComponent],
   templateUrl: './detail-panel.component.html',
   styleUrl: './detail-panel.component.scss',
 })
@@ -188,6 +189,11 @@ export class DetailPanelComponent {
   }
 
   onGenerateReport() {
+    this.reportService.isSelectorOpen.set(true);
+  }
+
+  onPerspectiveSelected(type: 'buyer' | 'renter') {
+    this.reportService.isSelectorOpen.set(false);
     if (!this.model || this.model.id !== 'property' || !this.model.coords) return;
     
     const addressSection = this.model.sections.find((section) => section.title === 'Address');
@@ -202,7 +208,8 @@ export class DetailPanelComponent {
     this.reportService.generateReport(
       this.model.coords.lat,
       this.model.coords.lng,
-      primaryAddress
+      primaryAddress,
+      type
     ).subscribe();
   }
 }

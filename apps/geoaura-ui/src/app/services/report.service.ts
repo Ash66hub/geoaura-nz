@@ -38,12 +38,18 @@ export class ReportService {
   currentReport = signal<PropertyReport | null>(null);
   isLoading = signal<boolean>(false);
   hasError = signal<boolean>(false);
+  isSelectorOpen = signal<boolean>(false);
 
-  generateReport(lat: number, lng: number, address: string): Observable<PropertyReport | null> {
+  generateReport(lat: number, lng: number, address: string, userType: 'buyer' | 'renter' = 'buyer'): Observable<PropertyReport | null> {
     this.isLoading.set(true);
     this.hasError.set(false);
 
-    return this.http.post<PropertyReport>(`${this.apiUrl}/generate`, { lat, lng, address }).pipe(
+    return this.http.post<PropertyReport>(`${this.apiUrl}/generate`, { 
+      lat, 
+      lng, 
+      address,
+      user_type: userType 
+    }).pipe(
       tap(report => {
         this.currentReport.set(report);
         this.isLoading.set(false);

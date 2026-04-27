@@ -23,6 +23,7 @@ class ReportRequest(BaseModel):
     lat: float
     lng: float
     address: str
+    user_type: str = "buyer"
 
 
 @router.post("/generate")
@@ -33,7 +34,9 @@ async def generate_report(request: ReportRequest):
     """
     try:
         agent = _get_agent()
-        report = await agent.generate_report(request.lat, request.lng, request.address)
+        report = await agent.generate_report(
+            request.lat, request.lng, request.address, user_type=request.user_type
+        )
         return report
     except Exception as exc:
         logger.exception("Report generation failed for %s", request.address)

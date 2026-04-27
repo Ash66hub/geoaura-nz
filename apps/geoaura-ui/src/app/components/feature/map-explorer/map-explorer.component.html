@@ -1,8 +1,10 @@
 <div #mapContainer class="map-container"></div>
 
-<div class="address-search-overlay">
-  <app-address-search (addressSelected)="onAddressSelected($event)"></app-address-search>
-</div>
+@if (!reportService.isSelectorOpen()) {
+  <div class="address-search-overlay">
+    <app-address-search (addressSelected)="onAddressSelected($event)"></app-address-search>
+  </div>
+}
 
 <div class="layer-control-panel">
   <div class="layer-header">

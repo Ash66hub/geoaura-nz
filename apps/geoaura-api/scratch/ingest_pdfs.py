@@ -89,12 +89,27 @@ def ingest_pdf_from_url(url, doc_type):
     print(f"Finished check/ingestion for {doc_type}!")
 
 if __name__ == "__main__":
-    urls = [
-       '// ENTER URLs HERE'
+    # Building Code Files
+    code_urls = [
+        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/NZ%20Building%20Code/b1-structure-as1-second-edition-2.pdf",
+        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/NZ%20Building%20Code/building-code-handbook-3rd-edition-amendment-13.pdf",
+        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/NZ%20Building%20Code/e1-surface-water-1st-edition-amendment-12.pdf",
+        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/NZ%20Building%20Code/e2-external-moisture-as1-fourth-edition.pdf"
     ]
     
-    for url in urls:
+    # District Plan Files
+    plan_urls = [
+        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/NZ%20Building%20Code/District%20plan/Hamilton-plan.pdf"
+    ]
+    
+    for url in code_urls:
         try:
             ingest_pdf_from_url(url, "building_code")
         except Exception as e:
-            print(f"Failed to ingest {url}: {e}")
+            print(f"Failed to ingest building code {url}: {e}")
+
+    for url in plan_urls:
+        try:
+            ingest_pdf_from_url(url, "district_plan")
+        except Exception as e:
+            print(f"Failed to ingest district plan {url}: {e}")

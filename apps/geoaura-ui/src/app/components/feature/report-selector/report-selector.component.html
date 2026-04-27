@@ -1,0 +1,47 @@
+<div class="selector-overlay" (click)="onClose()">
+  <div class="selector-modal" (click)="$event.stopPropagation()">
+    <header class="selector-header">
+      <div class="header-icon">
+        <span class="material-symbols-outlined">auto_awesome</span>
+      </div>
+      <h2>Generate Aura Intelligence Report</h2>
+      <button class="close-btn" (click)="onClose()">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </header>
+
+    <div class="selector-body">
+      <p class="description">
+        Choose your perspective to tailor the AI's analysis. The tool will gather specific data points relevant to your needs.
+      </p>
+
+      <div class="option-grid">
+        <button class="option-card buyer" (click)="onSelect('buyer')">
+          <div class="option-icon">
+            <span class="material-symbols-outlined">real_estate_agent</span>
+          </div>
+          <div class="option-content">
+            <h3>I'm a Buyer</h3>
+            <p>Focus on structural integrity, land hazards, and long-term capital risk.</p>
+          </div>
+          <span class="material-symbols-outlined arrow">chevron_right</span>
+        </button>
+
+        <button class="option-card renter" (click)="onSelect('renter')">
+          <div class="option-icon">
+            <span class="material-symbols-outlined">key</span>
+          </div>
+          <div class="option-content">
+            <h3>I'm a Renter</h3>
+            <p>Focus on living standards, neighborhood safety, and rental value context.</p>
+          </div>
+          <span class="material-symbols-outlined arrow">chevron_right</span>
+        </button>
+      </div>
+    </div>
+
+    <footer class="selector-footer">
+      <p>Report generated using LINZ, NIWA, Police, and Building Code data.</p>
+    </footer>
+  </div>
+</div>

@@ -19,6 +19,7 @@ import {
   PropertySummary,
 } from '../../../services/property.service';
 import { SeismicService } from '../../../services/seismic.service';
+import { ReportService } from '../../../services/report.service';
 import { CommonModule } from '@angular/common';
 import { GaugeModalComponent } from '../flood-flow-gauge/gauge-modal/gauge-modal.component';
 import { AddressSearchComponent } from '../../shared/address-search/address-search.component';
@@ -69,6 +70,7 @@ export class MapExplorerComponent implements OnInit {
   private ngZone = inject(NgZone);
   private policeService = inject(PoliceService);
   private rentService = inject(RentService);
+  public reportService = inject(ReportService);
 
   selectedGauge = signal<GaugeProperties | null>(null);
   selectedPoliceMeshblock = signal<Record<string, unknown> | null>(null);
@@ -431,8 +433,8 @@ export class MapExplorerComponent implements OnInit {
     this.isDetailPanelMinimized.update((v) => !v);
   }
 
-  setPanelInfoMode(mode: DetailPanelInfoMode) {
-    this.panelInfoMode.set(mode);
+  setPanelInfoMode(mode: any) {
+    this.panelInfoMode.set(mode as DetailPanelInfoMode);
   }
 
   private isLayerActive(id: string): boolean {

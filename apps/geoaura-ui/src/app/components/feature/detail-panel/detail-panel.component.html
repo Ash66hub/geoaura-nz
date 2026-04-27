@@ -108,7 +108,22 @@
                 }
               </div>
             </div>
-            <p class="section-desc">{{ section.description }}</p>
+            <p class="section-desc">
+              {{ section.description }}
+            </p>
+
+            @if (section.title === 'Address') {
+              @if (getPropertyGoogleMapsLink(); as mapsLink) {
+                <div class="panel-google-maps-link" style="margin-top: 12px;">
+                  <a [href]="mapsLink" target="_blank" rel="noopener noreferrer" 
+                     style="display: inline-flex; align-items: center; gap: 6px; color: #14b8a6; text-decoration: none; font-size: 0.85rem; font-weight: 500;">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">map</span>
+                    Open in Google Maps
+                  </a>
+                </div>
+              }
+            }
+
             @if (section.legendItems?.length) {
               <div class="section-legend" aria-label="Layer symbology">
                 @for (item of section.legendItems; track item.label) {
@@ -133,12 +148,6 @@
                 }
               </div>
             }
-          </div>
-        }
-
-        @if (getPropertyGoogleMapsLink(); as mapsLink) {
-          <div class="panel-google-maps-link">
-            <a [href]="mapsLink" target="_blank" rel="noopener noreferrer"> Open in Google Maps </a>
           </div>
         }
 
@@ -269,19 +278,20 @@
               </div>
             }
 
-            <button
-              id="generate-report-btn"
-              class="generate-report-btn"
-              [disabled]="reportService.isLoading()"
-              (click)="onGenerateReport()">
-              @if (reportService.isLoading()) {
-                <span class="section-loading-spinner mr-2" aria-label="Generating"></span>
-                Agents Working...
-              } @else {
+            @if (!reportService.isLoading()) {
+              <button
+                id="generate-report-btn"
+                class="generate-report-btn"
+                (click)="onGenerateReport()">
                 <span class="material-symbols-outlined">auto_awesome</span>
-                Generate Intelligence Report
-              }
-            </button>
+                Generate Aura Report
+              </button>
+            } @else {
+              <div class="agents-loading-state" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(20, 184, 166, 0.1); border-radius: 12px; color: #14b8a6; font-weight: 500;">
+                <span class="section-loading-spinner" aria-label="Generating"></span>
+                <span>Generating report...</span>
+              </div>
+            }
           </div>
         }
 
@@ -313,4 +323,11 @@
       }
     </div>
   </div>
+}
+
+@if (reportService.isSelectorOpen()) {
+  <app-report-selector 
+    (select)="onPerspectiveSelected($event)"
+    (close)="reportService.isSelectorOpen.set(false)">
+  </app-report-selector>
 }
