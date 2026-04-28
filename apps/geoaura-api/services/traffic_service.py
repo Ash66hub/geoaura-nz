@@ -23,6 +23,7 @@ class TrafficService:
         bbox: list[float],
         limit: int = 5000,
         out_fields: str = "*",
+        spatial_rel: str = "esriSpatialRelIntersects",
         extra_params: str = "",
     ) -> str:
         geometry_json = {
@@ -41,7 +42,7 @@ class TrafficService:
             f"geometry={geometry_encoded}&"
             f"geometryType=esriGeometryEnvelope&"
             f"inSR=4326&"
-            f"spatialRel=esriSpatialRelIntersects&"
+            f"spatialRel={spatial_rel}&"
             f"outFields={out_fields}&"
             f"f=geojson&"
             f"outSR=4326"

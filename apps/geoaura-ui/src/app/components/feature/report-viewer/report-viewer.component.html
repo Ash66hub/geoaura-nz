@@ -56,7 +56,7 @@
                 </span>
               </div>
               <p class="risk-card-content">{{ section.content }}</p>
-              @if (section.key_facts?.length) {
+              @if (section.key_facts.length) {
                 <ul class="key-facts-list">
                   @for (fact of section.key_facts; track $index) {
                     <li>

@@ -17,7 +17,7 @@ from services.linz_service import LINZService
 from services.police_service import PoliceService
 from services.rent_service import RentService
 from services.seismic_service import SeismicService
-from services.traffic_service import TrafficService, TRAFFIC_LINES_URL
+from services.traffic_service import TrafficService, TRAFFIC_LINES_URL, TRAFFIC_HAMILTON_POINTS_URL
 from services.supabase_service import SupabaseService
 
 logger = logging.getLogger(__name__)
@@ -193,28 +193,58 @@ class AgentService:
             return {"error": str(exc)}
 
     async def _fetch_traffic(self, lat: float, lng: float) -> dict[str, Any]:
-        bbox = _build_bbox(lat, lng, radius=0.05)
-        result: dict[str, Any] = {}
-        async with httpx.AsyncClient(timeout=15) as client:
-            sh_url = self._traffic.get_query_url_with_bbox(TRAFFIC_LINES_URL, bbox, limit=10)
-            try:
-                resp = await client.get(sh_url)
-                resp.raise_for_status()
-                features = resp.json().get("features", [])
-                aadt_values = [
-                    f.get("properties", {}).get("AADT")
-                    for f in features
-                    if f.get("properties", {}).get("AADT")
-                ]
-                result["state_highways"] = {
-                    "segment_count": len(features),
-                    "aadt_values": aadt_values[:5],
-                }
-            except Exception as exc:
-                logger.warning("State highway traffic fetch failed: %s", exc)
-                result["state_highways"] = {"error": str(exc)}
+        # Increase radius for a better catch of nearby arterial roads
+        bbox = _build_bbox(lat, lng, radius=0.009)  # ~1km
+        all_segments = []
+        
+        aadt_fields = [
+            'Year2023', 'Year2022', 'Year2021', 'Year2020', 'Year2019', 'Year2018',
+            'AADT', 'Average_AADT', 'ADT', 'aadt', 'adt'
+        ]
 
-        return result
+        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "GeoAura/0.1.0"}) as client:
+            # 1. NZTA State Highways
+            sh_url = self._traffic.get_query_url_with_bbox(TRAFFIC_LINES_URL, bbox, limit=30)
+            
+            # 2. Hamilton Local (Points) - EnvelopeIntersects is much more reliable for points
+            h_url = self._traffic.get_query_url_with_bbox(
+                TRAFFIC_HAMILTON_POINTS_URL, 
+                bbox, 
+                limit=30,
+                spatial_rel="esriSpatialRelEnvelopeIntersects"
+            )
+            
+            for source_name, url in [("State Highway", sh_url), ("Hamilton Local", h_url)]:
+                try:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    features = data.get("features", [])
+                    
+                    found_in_source = 0
+                    for f in features:
+                        props = f.get("properties", {})
+                        aadt_val = next((props.get(field) for field in aadt_fields if props.get(field)), None)
+                        
+                        if aadt_val:
+                            road_name = props.get("RoadName") or props.get("roadname") or \
+                                       props.get("Site_Location") or props.get("Site_Name") or \
+                                       props.get("name") or props.get("Name") or "Nearby Road"
+                            
+                            all_segments.append({
+                                "road_name": road_name,
+                                "traffic_volume_aadt": aadt_val,
+                                "source": source_name
+                            })
+                except Exception as exc:
+                    logger.warning(f"Traffic fetch failed for {source_name}: {exc}")
+
+        all_segments.sort(key=lambda x: float(x["traffic_volume_aadt"]) if str(x["traffic_volume_aadt"]).replace('.','',1).isdigit() else 0, reverse=True)
+        
+        return {
+            "description": "Nearby road traffic volumes (AADT). Higher values indicate busier and potentially noisier roads.",
+            "nearby_segments": all_segments[:15]
+        }
 
     # ------------------------------------------------------------------ #
     #  RAG / Knowledge retrieval                                         #
@@ -332,7 +362,7 @@ If a data section shows no features or an error, explicitly state "No data avail
 ## 5. MARKET RENT (Tenancy Services MBIE)
 {json.dumps(rent_data, indent=2, default=str)}
 
-## 6. TRAFFIC VOLUME (NZTA Waka Kotahi)
+## 6. TRAFFIC & ROAD NOISE DATA (Nearby Arterial & State Highways)
 {json.dumps(traffic_data, indent=2, default=str)}
 
 ---

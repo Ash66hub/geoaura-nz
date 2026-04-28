@@ -12,9 +12,18 @@
   height: 100%;
 }
 
+.map-interaction-blocker {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: transparent;
+  pointer-events: auto;
+  cursor: default;
+}
+
 .address-search-overlay {
   position: absolute;
-  top: 2rem;
+  top: 78px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 40;
@@ -25,7 +34,7 @@
 
 @media (max-width: 1280px) {
   .address-search-overlay {
-    top: 1.25rem;
+    top: 80px;
     left: 24px;
     transform: none;
     width: min(30rem, max(15rem, calc(100% - 24px - 24px - 360px - 16px)));
@@ -35,7 +44,7 @@
 
 .layer-control-panel {
   position: absolute;
-  top: 130px;
+  top: 156px;
   left: 24px;
   z-index: 30;
   width: 224px;
@@ -278,12 +287,18 @@
 
 .right-detail-panel-overlay {
   position: absolute;
-  top: 0;
+  top: 54px;
   bottom: 0;
   right: 0;
   z-index: 30;
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
+  pointer-events: none;
+  
+  &.has-selector {
+    z-index: 3000;
+    pointer-events: auto;
+  }
   
   @media (max-width: 768px) {
     top: auto;

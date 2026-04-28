@@ -7,6 +7,7 @@ import {
   signal,
   computed,
   NgZone,
+  effect,
 } from '@angular/core';
 import * as maplibregl from 'maplibre-gl';
 import { LngLatBoundsLike } from 'maplibre-gl';
@@ -71,6 +72,13 @@ export class MapExplorerComponent implements OnInit {
   private policeService = inject(PoliceService);
   private rentService = inject(RentService);
   public reportService = inject(ReportService);
+  
+  constructor() {
+    effect(() => {
+      const isLocked = this.reportService.isSelectorOpen() || !!this.reportService.currentReport();
+      this.toggleMapInteractions(!isLocked);
+    });
+  }
 
   selectedGauge = signal<GaugeProperties | null>(null);
   selectedPoliceMeshblock = signal<Record<string, unknown> | null>(null);
@@ -594,7 +602,7 @@ export class MapExplorerComponent implements OnInit {
       setSelectedPropertySummary: (summary) => this.selectedPropertySummary.set(summary),
       setDetailPanelMinimized: (isMinimized) => this.isDetailPanelMinimized.set(isMinimized),
     });
-    map.addControl(new maplibregl.NavigationControl());
+    map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
     this.zoomLevel.set(Number(map.getZoom().toFixed(1)));
     map.on('zoom', () => {
@@ -1384,5 +1392,28 @@ export class MapExplorerComponent implements OnInit {
         this.rentStatsLoading.set(false);
       },
     });
+  }
+
+  private toggleMapInteractions(enabled: boolean) {
+    if (!this.map) return;
+
+    const map = this.map;
+    if (enabled) {
+      map.dragPan.enable();
+      map.scrollZoom.enable();
+      map.boxZoom.enable();
+      map.dragRotate.enable();
+      map.keyboard.enable();
+      map.doubleClickZoom.enable();
+      map.touchZoomRotate.enable();
+    } else {
+      map.dragPan.disable();
+      map.scrollZoom.disable();
+      map.boxZoom.disable();
+      map.dragRotate.disable();
+      map.keyboard.disable();
+      map.doubleClickZoom.disable();
+      map.touchZoomRotate.disable();
+    }
   }
 }

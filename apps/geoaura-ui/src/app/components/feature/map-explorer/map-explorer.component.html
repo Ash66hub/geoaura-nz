@@ -1,4 +1,7 @@
 <div #mapContainer class="map-container"></div>
+@if (reportService.isSelectorOpen() || !!reportService.currentReport()) {
+  <div class="map-interaction-blocker"></div>
+}
 
 @if (!reportService.isSelectorOpen()) {
   <div class="address-search-overlay">
@@ -83,7 +86,7 @@
 }
 
 @if (detailPanelModel()) {
-  <div class="right-detail-panel-overlay">
+  <div class="right-detail-panel-overlay" [class.has-selector]="reportService.isSelectorOpen()">
     <app-detail-panel
       [model]="detailPanelModel()"
       [minimized]="isDetailPanelMinimized()"
