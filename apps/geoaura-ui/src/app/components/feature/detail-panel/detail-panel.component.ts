@@ -1,10 +1,11 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CrimePieChartComponent } from '../../shared/crime-pie-chart/crime-pie-chart.component';
 import { RentStatistics } from '../../../services/rent.service';
 import { ReportService } from '../../../services/report.service';
 import { ReportSelectorComponent } from '../report-selector/report-selector.component';
-import { inject, signal } from '@angular/core';
+import { AuthService } from '../../../services/auth.service';
+import { FloodDataService } from '../../../services/flood-data.service';
 
 export type DetailPanelInfoMode = 'layer' | 'property';
 
@@ -76,6 +77,8 @@ export class DetailPanelComponent {
   @Output() toggleMinimize = new EventEmitter<void>();
   @Output() infoModeChange = new EventEmitter<DetailPanelInfoMode>();
   public reportService = inject(ReportService);
+  public authService = inject(AuthService);
+  private floodDataService = inject(FloodDataService);
   
   showRateInfo = false;
   showPopulationAdjustedRateInfo = false;
@@ -192,7 +195,7 @@ export class DetailPanelComponent {
     this.reportService.isSelectorOpen.set(true);
   }
 
-  onPerspectiveSelected(type: 'buyer' | 'renter') {
+  async onPerspectiveSelected(type: 'buyer' | 'renter') {
     this.reportService.isSelectorOpen.set(false);
     if (!this.model || this.model.id !== 'property' || !this.model.coords) return;
     
@@ -205,11 +208,19 @@ export class DetailPanelComponent {
       .replace(/\.+$/, '')
       .trim();
 
+    // Fetch fresh flood data on-demand (browser-side) before generating the report.
+    // This ensures NIWA data is included even if the map layer is not active.
+    const floodData = await this.floodDataService.fetchForCoords(
+      this.model.coords.lat,
+      this.model.coords.lng
+    );
+
     this.reportService.generateReport(
       this.model.coords.lat,
       this.model.coords.lng,
       primaryAddress,
-      type
+      type,
+      floodData
     ).subscribe();
   }
 }

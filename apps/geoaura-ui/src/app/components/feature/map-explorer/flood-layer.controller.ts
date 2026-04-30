@@ -1,5 +1,6 @@
 import * as maplibregl from 'maplibre-gl';
 import { FloodService } from '../../../services/flood.service';
+import { FloodDataService } from '../../../services/flood-data.service';
 
 interface FloodExtentInfo {
   gauges_url?: string;
@@ -11,6 +12,7 @@ interface FloodExtentInfo {
 interface FloodLayerControllerDeps {
   map: maplibregl.Map;
   floodService: FloodService;
+  floodDataService: FloodDataService;
   isLayerActive: () => boolean;
   bindFeatureTooltips: () => void;
   addRiverNetworkLayer: (active: boolean) => void;
@@ -26,6 +28,7 @@ interface FloodLayerControllerDeps {
 export class FloodLayerController {
   private readonly map: maplibregl.Map;
   private readonly floodService: FloodService;
+  private readonly floodDataService: FloodDataService;
   private readonly isLayerActive: () => boolean;
   private readonly bindFeatureTooltips: () => void;
   private readonly addRiverNetworkLayer: (active: boolean) => void;
@@ -46,6 +49,7 @@ export class FloodLayerController {
   constructor(deps: FloodLayerControllerDeps) {
     this.map = deps.map;
     this.floodService = deps.floodService;
+    this.floodDataService = deps.floodDataService;
     this.isLayerActive = deps.isLayerActive;
     this.bindFeatureTooltips = deps.bindFeatureTooltips;
     this.addRiverNetworkLayer = deps.addRiverNetworkLayer;
@@ -142,7 +146,7 @@ export class FloodLayerController {
               this.setFloodGaugesLoading(true);
               fetch(info.gauges_url, { signal })
                 .then((res) => res.json())
-                .then((geojson: GeoJSON.GeoJSON) => {
+                .then((geojson: GeoJSON.FeatureCollection) => {
                   const source = this.map.getSource('flood-gauges') as maplibregl.GeoJSONSource;
                   source?.setData(geojson);
                 })
@@ -164,9 +168,10 @@ export class FloodLayerController {
               this.setFloodRiversLoading(true);
               fetch(info.rivers_url, { signal })
                 .then((res) => res.json())
-                .then((geojson: GeoJSON.GeoJSON) => {
+                .then((geojson: GeoJSON.FeatureCollection) => {
                   const source = this.map.getSource('flood-rivers') as maplibregl.GeoJSONSource;
                   source?.setData(geojson);
+                  this.floodDataService.setRivers(geojson.features ?? []);
                 })
                 .catch((err) => {
                   if (err?.name !== 'AbortError') {
@@ -192,8 +197,9 @@ export class FloodLayerController {
               this.setFloodPlainsLoading(true);
               fetch(info.plains_url, { signal })
                 .then((res) => res.json())
-                .then((geojson: GeoJSON.GeoJSON) => {
+                .then((geojson: GeoJSON.FeatureCollection) => {
                   plainsSource?.setData(geojson);
+                  this.floodDataService.setPlains(geojson.features ?? []);
                 })
                 .catch((err) => {
                   if (err?.name !== 'AbortError') {
@@ -219,8 +225,9 @@ export class FloodLayerController {
               this.setFloodOverviewLoading(true);
               this.floodService
                 .getHamiltonHazardGeoJson(info.hamilton_hazard_url, signal)
-                .then((geojson: GeoJSON.GeoJSON) => {
+                .then((geojson: GeoJSON.FeatureCollection) => {
                   hmSource?.setData(geojson);
+                  this.floodDataService.setHamiltonHazard(geojson.features ?? []);
                 })
                 .catch((err) => {
                   if (err?.name !== 'AbortError') {

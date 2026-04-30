@@ -328,6 +328,7 @@
 @if (reportService.isSelectorOpen()) {
   <app-report-selector 
     (select)="onPerspectiveSelected($event)"
-    (close)="reportService.isSelectorOpen.set(false)">
+    (close)="reportService.isSelectorOpen.set(false)"
+    (openSignIn)="authService.openAuthModal(); reportService.isSelectorOpen.set(false)">
   </app-report-selector>
 }

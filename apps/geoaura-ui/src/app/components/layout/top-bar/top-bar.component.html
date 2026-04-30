@@ -5,9 +5,55 @@
   </div>
 
   <div class="actions">
-    <button class="signin-btn">
-      <span class="material-symbols-outlined">login</span>
-      Sign in
-    </button>
+    @if (authService.loading()) {
+      <div class="avatar-skeleton"></div>
+    } @else if (authService.isLoggedIn()) {
+      <div class="user-menu-wrapper">
+        <button
+          id="user-menu-btn"
+          class="user-avatar-btn"
+          (click)="toggleUserMenu()"
+          [attr.aria-expanded]="showUserMenu()"
+          aria-haspopup="true"
+        >
+          @if (authService.user()?.avatarUrl) {
+            <img
+              [src]="authService.user()!.avatarUrl!"
+              [alt]="authService.user()!.name ?? 'User'"
+              class="avatar-img"
+              referrerpolicy="no-referrer"
+            />
+          } @else {
+            <div class="avatar-initials">
+              {{ (authService.user()?.name ?? authService.user()?.email ?? 'U')[0].toUpperCase() }}
+            </div>
+          }
+          <span class="material-symbols-outlined chevron" [class.open]="showUserMenu()">expand_more</span>
+        </button>
+
+        @if (showUserMenu()) {
+          <div class="user-dropdown">
+            <div class="dropdown-user-info">
+              <span class="dropdown-name">{{ authService.user()?.name ?? 'User' }}</span>
+              <span class="dropdown-email">{{ authService.user()?.email }}</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <button id="signout-btn" class="dropdown-item danger" (click)="signOut()">
+              <span class="material-symbols-outlined">logout</span>
+              Sign out
+            </button>
+          </div>
+        }
+      </div>
+    } @else {
+      <button id="signin-btn" class="signin-btn" (click)="openAuthModal()">
+        <span class="material-symbols-outlined">login</span>
+        Sign in
+      </button>
+    }
   </div>
 </header>
+
+@if (authService.showAuthModal()) {
+  <app-auth-modal (close)="closeAuthModal()" />
+}

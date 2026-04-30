@@ -22,8 +22,13 @@ async def get_rent_statistics(
     """Get market rent statistics for a specific area."""
     try:
         result = await rent_service.get_rent_statistics(area_definition, period_ending, num_months)
+        
         if not result:
             raise HTTPException(status_code=404, detail="No statistics found for this area and period.")
+            
+        if isinstance(result, dict) and "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+            
         return result
     except HTTPException:
         raise

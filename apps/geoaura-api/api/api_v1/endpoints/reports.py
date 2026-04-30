@@ -24,6 +24,7 @@ class ReportRequest(BaseModel):
     lng: float
     address: str
     user_type: str = "buyer"
+    flood_data: dict | None = None
 
 
 @router.post("/generate")
@@ -35,7 +36,9 @@ async def generate_report(request: ReportRequest):
     try:
         agent = _get_agent()
         report = await agent.generate_report(
-            request.lat, request.lng, request.address, user_type=request.user_type
+            request.lat, request.lng, request.address,
+            user_type=request.user_type,
+            flood_data=request.flood_data,
         )
         return report
     except Exception as exc:

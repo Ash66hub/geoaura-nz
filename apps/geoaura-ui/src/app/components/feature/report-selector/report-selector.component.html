@@ -10,38 +10,65 @@
       </button>
     </header>
 
-    <div class="selector-body">
-      <p class="description">
-        Choose your perspective to tailor the AI's analysis. The tool will gather specific data points relevant to your needs.
-      </p>
-
-      <div class="option-grid">
-        <button class="option-card buyer" (click)="onSelect('buyer')">
-          <div class="option-icon">
-            <span class="material-symbols-outlined">real_estate_agent</span>
-          </div>
-          <div class="option-content">
-            <h3>I'm a Buyer</h3>
-            <p>Focus on structural integrity, land hazards, and long-term capital risk.</p>
-          </div>
-          <span class="material-symbols-outlined arrow">chevron_right</span>
+    @if (!authService.isLoggedIn()) {
+      <!-- Auth gate -->
+      <div class="auth-gate">
+        <div class="auth-gate-icon">
+          <span class="material-symbols-outlined">lock</span>
+        </div>
+        <h3>Sign in to generate reports</h3>
+        <p>
+          Aura Intelligence Reports combine AI analysis with live property, flood, seismic,
+          traffic, and safety data. Sign in for free to access your personalised report.
+        </p>
+        <button class="sign-in-btn" (click)="openSignIn.emit(); onClose()">
+          <span class="material-symbols-outlined">login</span>
+          Sign in / Create account
         </button>
-
-        <button class="option-card renter" (click)="onSelect('renter')">
-          <div class="option-icon">
-            <span class="material-symbols-outlined">key</span>
-          </div>
-          <div class="option-content">
-            <h3>I'm a Renter</h3>
-            <p>Focus on living standards, neighborhood safety, and rental value context.</p>
-          </div>
-          <span class="material-symbols-outlined arrow">chevron_right</span>
-        </button>
+        <ul class="report-features">
+          <li><span class="material-symbols-outlined">water_damage</span> Flood &amp; coastal risk</li>
+          <li><span class="material-symbols-outlined">waves</span> Seismic &amp; fault analysis</li>
+          <li><span class="material-symbols-outlined">local_police</span> Crime &amp; safety profile</li>
+          <li><span class="material-symbols-outlined">traffic</span> Traffic &amp; road noise</li>
+          <li><span class="material-symbols-outlined">real_estate_agent</span> Market rent insights</li>
+          <li><span class="material-symbols-outlined">gavel</span> Regulatory compliance</li>
+        </ul>
       </div>
-    </div>
+    } @else {
+      <!-- Report type selection -->
+      <div class="selector-body">
+        <p class="description">
+          Choose your perspective to tailor the AI's analysis. The tool will gather specific data points relevant to your needs.
+        </p>
 
-    <footer class="selector-footer">
-      <p>Report generated using LINZ, NIWA, Police, and Building Code data.</p>
-    </footer>
+        <div class="option-grid">
+          <button class="option-card buyer" (click)="onSelect('buyer')">
+            <div class="option-icon">
+              <span class="material-symbols-outlined">real_estate_agent</span>
+            </div>
+            <div class="option-content">
+              <h3>I'm a Buyer</h3>
+              <p>Focus on structural integrity, land hazards, and long-term capital risk.</p>
+            </div>
+            <span class="material-symbols-outlined arrow">chevron_right</span>
+          </button>
+
+          <button class="option-card renter" (click)="onSelect('renter')">
+            <div class="option-icon">
+              <span class="material-symbols-outlined">key</span>
+            </div>
+            <div class="option-content">
+              <h3>I'm a Renter</h3>
+              <p>Focus on living standards, neighborhood safety, and rental value context.</p>
+            </div>
+            <span class="material-symbols-outlined arrow">chevron_right</span>
+          </button>
+        </div>
+      </div>
+
+      <footer class="selector-footer">
+        <p>Report generated using LINZ, NIWA, Police, and Building Code data.</p>
+      </footer>
+    }
   </div>
 </div>

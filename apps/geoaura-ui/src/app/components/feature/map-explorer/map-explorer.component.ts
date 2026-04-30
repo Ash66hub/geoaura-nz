@@ -44,6 +44,7 @@ import { PropertySelectionController } from './property-selection.controller';
 import { buildPropertyDetailModel } from './property-detail.model';
 import { RentService, RentStatistics } from '../../../services/rent.service';
 import { RentLayerController } from './rent-layer.controller';
+import { FloodDataService } from '../../../services/flood-data.service';
 
 const NZ_BOUNDS: LngLatBoundsLike = [
   [165.0, -48.5],
@@ -65,6 +66,7 @@ export class MapExplorerComponent implements OnInit {
 
   private mapContainer = viewChild<ElementRef>('mapContainer');
   private floodService = inject(FloodService);
+  private floodDataService = inject(FloodDataService);
   private trafficService = inject(TrafficService);
   private seismicService = inject(SeismicService);
   private propertyService = inject(PropertyService);
@@ -563,6 +565,7 @@ export class MapExplorerComponent implements OnInit {
     this.floodLayerController = new FloodLayerController({
       map,
       floodService: this.floodService,
+      floodDataService: this.floodDataService,
       isLayerActive: () => this.isLayerActive('flood'),
       bindFeatureTooltips: () => this.bindFeatureTooltips(map),
       addRiverNetworkLayer: (active: boolean) => this.addRiverNetworkLayer(map, '', active),
@@ -1368,6 +1371,15 @@ export class MapExplorerComponent implements OnInit {
               a.name.toLowerCase().includes(justSuburb.toLowerCase()) ||
               justSuburb.toLowerCase().includes(a.name.toLowerCase()),
           );
+        }
+
+        // Final fallback: Try "{City} - all other suburbs"
+        if (!area && suburbName.includes(' - ')) {
+          const parts = suburbName.split(' - ');
+          const city = parts[0].trim();
+          const fallbackName = `${city} - all other suburbs`.toLowerCase();
+          
+          area = areas.find((a) => a.name.toLowerCase() === fallbackName);
         }
 
         if (area) {

@@ -40,7 +40,7 @@ export class ReportService {
   hasError = signal<boolean>(false);
   isSelectorOpen = signal<boolean>(false);
 
-  generateReport(lat: number, lng: number, address: string, userType: 'buyer' | 'renter' = 'buyer'): Observable<PropertyReport | null> {
+  generateReport(lat: number, lng: number, address: string, userType: 'buyer' | 'renter' = 'buyer', floodData?: Record<string, unknown> | null): Observable<PropertyReport | null> {
     this.isLoading.set(true);
     this.hasError.set(false);
 
@@ -48,7 +48,8 @@ export class ReportService {
       lat, 
       lng, 
       address,
-      user_type: userType 
+      user_type: userType,
+      ...(floodData ? { flood_data: floodData } : {}),
     }).pipe(
       tap(report => {
         this.currentReport.set(report);

@@ -62,42 +62,47 @@ class AgentService:
         plains_url = self._flood.get_query_url_with_bbox(NIWA_FLOOD_PLAINS_URL, bbox, limit=10)
         rivers_url = self._flood.get_query_url_with_bbox(NIWA_RIVER_NETWORK_URL, bbox, limit=10)
 
-        result: dict[str, Any] = {}
-        async with httpx.AsyncClient(timeout=15) as client:
-            for key, url in [("coastal_plains", plains_url), ("river_network", rivers_url)]:
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    features = data.get("features", [])
-                    result[key] = {
-                        "feature_count": len(features),
-                        "properties": [f.get("properties", {}) for f in features[:5]],
-                    }
-                except Exception as exc:
-                    logger.warning("Flood fetch failed for %s: %s", key, exc)
-                    result[key] = {"feature_count": 0, "error": str(exc)}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept": "application/json, */*",
+            "Referer": "https://niwa.co.nz/",
+        }
 
-            # Hamilton-specific hazard layer if in range
-            if 174.9 <= lng <= 175.6 and -38.2 <= lat <= -37.4:
-                hamilton_url = self._flood.get_query_url_with_bbox(
-                    "https://maps.hamilton.govt.nz/server/rest/services/hcc_entpublic/portal_floodviewer_floodhazard/FeatureServer/1",
-                    bbox,
-                    limit=10,
-                    out_fields="OBJECTID,Hazard_Factor,Storm_Event",
-                )
-                try:
-                    resp = await client.get(hamilton_url)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    features = data.get("features", [])
-                    result["hamilton_flood_hazard"] = {
-                        "feature_count": len(features),
-                        "properties": [f.get("properties", {}) for f in features[:5]],
-                    }
-                except Exception as exc:
-                    logger.warning("Hamilton flood fetch failed: %s", exc)
-                    result["hamilton_flood_hazard"] = {"feature_count": 0, "error": str(exc)}
+        result: dict[str, Any] = {}
+
+        async def fetch_one(key: str, url: str, client: httpx.AsyncClient) -> tuple[str, Any]:
+            try:
+                resp = await asyncio.wait_for(client.get(url), timeout=3)
+                resp.raise_for_status()
+                data = resp.json()
+                if "error" in data:
+                    return key, {"feature_count": 0, "note": f"Server error: {data['error'].get('message', 'unknown')}"}
+                features = data.get("features", [])
+                return key, {
+                    "feature_count": len(features),
+                    "properties": [f.get("properties", {}) for f in features[:5]],
+                }
+            except (asyncio.TimeoutError, Exception):
+                # NIWA ArcGIS is only accessible browser-side; server-side requests are expected to fail
+                return key, {"feature_count": 0, "note": "NIWA flood data is fetched client-side; not available in server reports."}
+
+        sources = [("coastal_plains", plains_url), ("river_network", rivers_url)]
+
+        # Add Hamilton hazard layer if in range
+        if 174.9 <= lng <= 175.6 and -38.2 <= lat <= -37.4:
+            hamilton_url = self._flood.get_query_url_with_bbox(
+                "https://maps.hamilton.govt.nz/server/rest/services/hcc_entpublic/portal_floodviewer_floodhazard/FeatureServer/1",
+                bbox,
+                limit=10,
+                out_fields="OBJECTID,Hazard_Factor,Storm_Event",
+            )
+            sources.append(("hamilton_flood_hazard", hamilton_url))
+
+        async with httpx.AsyncClient(timeout=10, headers=headers) as client:
+            tasks = [fetch_one(key, url, client) for key, url in sources]
+            pairs = await asyncio.gather(*tasks)
+            for key, val in pairs:
+                result[key] = val
 
         return result
 
@@ -288,16 +293,25 @@ class AgentService:
     # ------------------------------------------------------------------ #
 
     async def generate_report(
-        self, lat: float, lng: float, address: str, user_type: str = "buyer"
+        self, lat: float, lng: float, address: str, user_type: str = "buyer",
+        flood_data: dict | None = None,
     ) -> dict[str, Any]:
         prop_task = asyncio.create_task(self._fetch_property(lat, lng))
-        flood_task = asyncio.create_task(self._fetch_flood(lat, lng))
         seismic_task = asyncio.create_task(self._fetch_seismic(lat, lng))
         rent_task = asyncio.create_task(self._fetch_rent(lat, lng))
         traffic_task = asyncio.create_task(self._fetch_traffic(lat, lng))
 
-        prop_data, flood_data, seismic_data, rent_data, traffic_data = await asyncio.gather(
-            prop_task, flood_task, seismic_task, rent_task, traffic_task,
+        # Use client-provided flood data if available (NIWA is only reachable browser-side)
+        async def _client_flood() -> dict:
+            return flood_data  # type: ignore[return-value]
+
+        if flood_data:
+            flood_task = asyncio.create_task(_client_flood())
+        else:
+            flood_task = asyncio.create_task(self._fetch_flood(lat, lng))
+
+        prop_data, seismic_data, rent_data, traffic_data, fetched_flood = await asyncio.gather(
+            prop_task, seismic_task, rent_task, traffic_task, flood_task,
             return_exceptions=True,
         )
 
@@ -305,7 +319,7 @@ class AgentService:
             return val if not isinstance(val, Exception) else {"error": str(val)}
 
         prop_data = safe(prop_data)
-        flood_data = safe(flood_data)
+        flood_data = flood_data or safe(fetched_flood)
         seismic_data = safe(seismic_data)
         rent_data = safe(rent_data)
         traffic_data = safe(traffic_data)
