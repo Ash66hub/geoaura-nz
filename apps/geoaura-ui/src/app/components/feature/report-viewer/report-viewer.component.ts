@@ -17,8 +17,15 @@ export class ReportViewerComponent {
     this.close.emit();
   }
 
-  onPrint() {
+  onDownloadPDF() {
+    // We use window.print() which allows users to "Save as PDF" natively.
+    // This preserves all CSS, material symbols, and complex gradients perfectly.
+    // In a production environment, you could also use a library like html2pdf.js
+    // for a direct download experience.
+    const originalTitle = document.title;
+    document.title = `GeoAura_Report_${this.report?.address.replace(/\s+/g, '_')}`;
     window.print();
+    document.title = originalTitle;
   }
 
   riskColor(level: string): string {

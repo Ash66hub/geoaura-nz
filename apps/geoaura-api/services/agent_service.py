@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -63,16 +64,16 @@ class AgentService:
         rivers_url = self._flood.get_query_url_with_bbox(NIWA_RIVER_NETWORK_URL, bbox, limit=10)
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            "Accept": "application/json, */*",
-            "Referer": "https://niwa.co.nz/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
         result: dict[str, Any] = {}
 
         async def fetch_one(key: str, url: str, client: httpx.AsyncClient) -> tuple[str, Any]:
             try:
-                resp = await asyncio.wait_for(client.get(url), timeout=3)
+                resp = await asyncio.wait_for(client.get(url), timeout=15)
                 resp.raise_for_status()
                 data = resp.json()
                 if "error" in data:
@@ -82,9 +83,9 @@ class AgentService:
                     "feature_count": len(features),
                     "properties": [f.get("properties", {}) for f in features[:5]],
                 }
-            except (asyncio.TimeoutError, Exception):
-                # NIWA ArcGIS is only accessible browser-side; server-side requests are expected to fail
-                return key, {"feature_count": 0, "note": "NIWA flood data is fetched client-side; not available in server reports."}
+            except Exception as exc:
+                logger.warning(f"Flood data fetch failed for {key}: {exc}")
+                return key, {"feature_count": 0, "note": f"Data retrieval error: {str(exc)}"}
 
         sources = [("coastal_plains", plains_url), ("river_network", rivers_url)]
 
@@ -98,7 +99,8 @@ class AgentService:
             )
             sources.append(("hamilton_flood_hazard", hamilton_url))
 
-        async with httpx.AsyncClient(timeout=10, headers=headers) as client:
+        # use verify=False and follow_redirects=True to match the proxy's robust behavior
+        async with httpx.AsyncClient(timeout=20, headers=headers, verify=False, follow_redirects=True) as client:
             tasks = [fetch_one(key, url, client) for key, url in sources]
             pairs = await asyncio.gather(*tasks)
             for key, val in pairs:
@@ -170,29 +172,106 @@ class AgentService:
             logger.warning("Crime data fetch failed: %s", exc)
             return {"error": str(exc)}
 
-    async def _fetch_rent(self, lat: float, lng: float) -> dict[str, Any]:
+    async def _fetch_rent(self, lat: float, lng: float, suburb: str | None = None, council: str | None = None) -> dict[str, Any]:
         try:
+            # 1. Use ArcGIS to find the exact suburb polygon at these coordinates
+            # This matches the frontend's "rent layer" source of truth
+            arcgis_suburb_name = None
+            try:
+                # Tight bbox for point intersection
+                bbox = [lng - 0.0001, lat - 0.0001, lng + 0.0001, lat + 0.0001]
+                suburbs_data = self._rent.get_rent_areas_for_extent(*bbox)
+                features = suburbs_data.get("features", [])
+                if features:
+                    props = features[0].get("properties", {})
+                    name = props.get("name") or props.get("locality") or props.get("suburb") or props.get("NAME") or props.get("Locality")
+                    major_name = props.get("major_name") or props.get("territorial_authority") or props.get("Major_Name")
+                    
+                    if major_name and name:
+                        arcgis_suburb_name = f"{major_name} - {name}"
+                    else:
+                        arcgis_suburb_name = name or major_name
+            except Exception as e:
+                logger.warning(f"ArcGIS suburb lookup failed for rent: {e}")
+
+            # 2. Get area definitions from MBIE
             areas = await self._rent.get_area_definitions()
             if not areas:
                 return {"available": False, "reason": "No area definitions returned from MBIE."}
 
-            first_area_id = areas[0].get("area-definition") if areas else None
-            if not first_area_id:
-                return {"available": False, "reason": "Area definition ID could not be resolved."}
+            target_area_id = None
+            target_area_name = None
 
-            stats = await self._rent.get_rent_statistics(str(first_area_id))
+            # 3. Matching logic (replicated from frontend fetchRentStats)
+            search_names = []
+            if arcgis_suburb_name:
+                search_names.append(arcgis_suburb_name)
+            if suburb and council:
+                search_names.append(f"{council} - {suburb}")
+            if suburb:
+                search_names.append(suburb)
+
+            for s_name in search_names:
+                s_name_lower = s_name.lower()
+                # Exact match
+                area = next((a for a in areas if a.get("name", "").lower() == s_name_lower), None)
+                if area:
+                    target_area_id = area.get("area-definition")
+                    target_area_name = area.get("name")
+                    break
+                
+                # Partial match
+                area = next((a for a in areas if s_name_lower in a.get("name", "").lower() or a.get("name", "").lower() in s_name_lower), None)
+                if area:
+                    target_area_id = area.get("area-definition")
+                    target_area_name = area.get("name")
+                    break
+                
+                # City - Suburb split match
+                if " - " in s_name:
+                    just_suburb = s_name.split(" - ")[-1].strip().lower()
+                    area = next((a for a in areas if just_suburb in a.get("name", "").lower() or a.get("name", "").lower() in just_suburb), None)
+                    if area:
+                        target_area_id = area.get("area-definition")
+                        target_area_name = area.get("name")
+                        break
+                    
+                    # Fallback to "{City} - all other suburbs"
+                    city = s_name.split(" - ")[0].strip().lower()
+                    fallback_name = f"{city} - all other suburbs"
+                    area = next((a for a in areas if a.get("name", "").lower() == fallback_name), None)
+                    if area:
+                        target_area_id = area.get("area-definition")
+                        target_area_name = area.get("name")
+                        break
+
+            # 4. Final safety fallback
+            if not target_area_id:
+                target_area_id = areas[0].get("area-definition")
+                target_area_name = areas[0].get("name")
+                logger.warning(f"Could not find matching rent area for {search_names}. Falling back to {target_area_name}")
+
+            # 5. Fetch stats
+            stats = await self._rent.get_rent_statistics(str(target_area_id))
             items = stats.get("statistics", [])
 
             summary = [
                 {
-                    "type": item.get("dwelling-type", "Unknown"),
-                    "bedrooms": item.get("num-bedrooms", "Any"),
+                    "dwelling_type": item.get("dwelling-type", "Unknown"),
+                    "num_bedrooms": item.get("num-bedrooms", "Any"),
                     "median_rent_nzd": item.get("median-rent"),
-                    "count": item.get("count"),
+                    "listing_count": item.get("count"),
                 }
-                for item in items[:8]
+                for item in items if item.get("median-rent")
             ]
-            return {"area_id": first_area_id, "rent_samples": summary}
+            
+            # Sort by count descending
+            summary.sort(key=lambda x: int(x["listing_count"]) if str(x["listing_count"]).isdigit() else 0, reverse=True)
+
+            return {
+                "matched_area": target_area_name,
+                "rent_samples": summary[:15]
+            }
         except Exception as exc:
             logger.warning("Rent data fetch failed: %s", exc)
             return {"error": str(exc)}
@@ -295,188 +374,216 @@ class AgentService:
     async def generate_report(
         self, lat: float, lng: float, address: str, user_type: str = "buyer",
         flood_data: dict | None = None,
+        report_id: str | None = None
     ) -> dict[str, Any]:
-        prop_task = asyncio.create_task(self._fetch_property(lat, lng))
-        seismic_task = asyncio.create_task(self._fetch_seismic(lat, lng))
-        rent_task = asyncio.create_task(self._fetch_rent(lat, lng))
-        traffic_task = asyncio.create_task(self._fetch_traffic(lat, lng))
-
-        # Use client-provided flood data if available (NIWA is only reachable browser-side)
-        async def _client_flood() -> dict:
-            return flood_data  # type: ignore[return-value]
-
-        if flood_data:
-            flood_task = asyncio.create_task(_client_flood())
-        else:
-            flood_task = asyncio.create_task(self._fetch_flood(lat, lng))
-
-        prop_data, seismic_data, rent_data, traffic_data, fetched_flood = await asyncio.gather(
-            prop_task, seismic_task, rent_task, traffic_task, flood_task,
-            return_exceptions=True,
-        )
-
-        def safe(val: Any) -> Any:
-            return val if not isinstance(val, Exception) else {"error": str(val)}
-
-        prop_data = safe(prop_data)
-        flood_data = flood_data or safe(fetched_flood)
-        seismic_data = safe(seismic_data)
-        rent_data = safe(rent_data)
-        traffic_data = safe(traffic_data)
-
-        crime_data = self._fetch_crime(lat, lng)
-
-        # RAG: Fetch relevant building code snippets based on detected risks
-        rag_queries = ["general property compliance"]
-        if flood_data.get("coastal_plains", {}).get("feature_count", 0) > 0 or \
-           flood_data.get("hamilton_flood_hazard", {}).get("feature_count", 0) > 0:
-            rag_queries.append("Surface water drainage and flood protection E1")
-        
-        if seismic_data.get("immediate_fault_lines", {}).get("feature_count", 0) > 0:
-            rag_queries.append("Structural safety and earthquake resilience B1")
-            
-        rag_context = await self._fetch_rag_context(rag_queries, doc_type="building_code")
-
-        # District Plan RAG: Specifically for Hamilton
-        is_hamilton = 174.9 <= lng <= 175.6 and -38.2 <= lat <= -37.4
-        if is_hamilton:
-            plan_queries = ["residential zoning rules", "building setbacks and height limits", "site coverage"]
-            plan_context = await self._fetch_rag_context(plan_queries, doc_type="district_plan")
-            rag_context += "\n\n### HAMILTON DISTRICT PLAN INSIGHTS:\n" + plan_context
-
-        persona = "friendly and helpful property guide"
-        focus_area = "making the data easy to understand and highlighting what truly matters for your future home" if user_type == "buyer" else "your daily lifestyle, safety, and whether the area is a good fit for you"
-
-        prompt = f"""
-You are GeoAura NZ – a {persona}. Your goal is to explain property data in simple, plain English for a potential {user_type}.
-
-ADDRESS: {address}
-COORDINATES: {lat:.6f}, {lng:.6f}
-
-Focus specifically on {focus_area}. 
-
-IMPORTANT: Avoid overly technical jargon. If you must mention a technical term (like 'liquefaction' or 'AADT'), briefly explain what it means in a way a layman would understand.
-
-Use ONLY the data provided below. Do not invent, embellish, or make assumptions beyond the data.
-If a data section shows no features or an error, explicitly state "No data available" rather than omitting the section.
-
----
-## 1. PROPERTY DATA (LINZ)
-{json.dumps(prop_data, indent=2, default=str)}
-
-## 2. FLOOD & COASTAL RISK (NIWA / Waikato RC)
-{json.dumps(flood_data, indent=2, default=str)}
-
-## 3. SEISMIC & FAULT LINE RISK (GeoNet / GNS Science)
-{json.dumps(seismic_data, indent=2, default=str)}
-
-## 4. CRIME & SAFETY (NZ Police – Feb 2025 to Jan 2026)
-{json.dumps(crime_data, indent=2, default=str)}
-
-## 5. MARKET RENT (Tenancy Services MBIE)
-{json.dumps(rent_data, indent=2, default=str)}
-
-## 6. TRAFFIC & ROAD NOISE DATA (Nearby Arterial & State Highways)
-{json.dumps(traffic_data, indent=2, default=str)}
-
----
-## 7. RELEVANT NZ BUILDING CODE & DISTRICT PLAN SNIPPETS (RAG)
-{rag_context}
----
-
-OUTPUT FORMAT – Return valid JSON only, with exactly this structure:
-{{
-  "title": "string – Property Intelligence Report: <address>",
-  "generated_at": "string – ISO 8601 datetime (UTC)",
-  "address": "string",
-  "coordinates": {{"lat": number, "lng": number}},
-  "executive_summary": "string – 3-4 sentence high-level overview covering the most important findings",
-  "sections": [
-    {{
-      "id": "property",
-      "title": "Property & Title",
-      "icon": "home_pin",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string – factual narrative, 3-6 sentences",
-      "key_facts": ["string", "string"]
-    }},
-    {{
-      "id": "flood",
-      "title": "Flood & Coastal Risk",
-      "icon": "water_damage",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string",
-      "key_facts": ["string"]
-    }},
-    {{
-      "id": "seismic",
-      "title": "Seismic & Fault Line Risk",
-      "icon": "waves",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string",
-      "key_facts": ["string"]
-    }},
-    {{
-      "id": "crime",
-      "title": "Safety & Crime Profile",
-      "icon": "local_police",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string",
-      "key_facts": ["string"]
-    }},
-    {{
-      "id": "rent",
-      "title": "Market Rent & Investment",
-      "icon": "real_estate_agent",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string",
-      "key_facts": ["string"]
-    }},
-    {{
-      "id": "traffic",
-      "title": "Traffic & Accessibility",
-      "icon": "traffic",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string",
-      "key_facts": ["string"]
-    }},
-    {{
-      "id": "regulatory",
-      "title": "Regulatory & Building Code",
-      "icon": "gavel",
-      "risk_level": "low | medium | high | unknown",
-      "content": "string – explain how the building code and district plan snippets apply to the specific risks identified (e.g. earthquake or flood mitigation)",
-      "key_facts": ["string – reference specific code clauses like E1, B1, etc."]
-    }}
-  ],
-  "overall_risk_rating": "low | medium | high",
-  "recommendation": "string – 2-3 sentence overall recommendation specifically tailored for a {user_type}",
-  "disclaimer": "This report is generated by AI using publicly available New Zealand datasets. It is provided for informational purposes only and does not constitute professional legal, financial, or property advice. A registered professional LIM report from the relevant local council should be obtained before making any property purchasing decision."
-}}
-""".strip()
+        if report_id:
+            self._supabase.update_report(report_id, "PROCESSING")
 
         try:
-            response = self._client.models.generate_content(
-                model="gemini-3-flash-preview",
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.2,
-                ),
+            prop_data = await self._fetch_property(lat, lng)
+            
+            # Extract suburb and council for more accurate rent/data matching
+            suburb = prop_data.get("suburb_locality")
+            council = prop_data.get("territorial_authority")
+
+            rent_task = asyncio.create_task(self._fetch_rent(lat, lng, suburb=suburb, council=council))
+            seismic_task = asyncio.create_task(self._fetch_seismic(lat, lng))
+            traffic_task = asyncio.create_task(self._fetch_traffic(lat, lng))
+
+            # Use client-provided flood data if available
+            async def _client_flood() -> dict:
+                return flood_data  # type: ignore[return-value]
+
+            if flood_data:
+                flood_task = asyncio.create_task(_client_flood())
+            else:
+                flood_task = asyncio.create_task(self._fetch_flood(lat, lng))
+
+            seismic_data, rent_data, traffic_data, fetched_flood = await asyncio.gather(
+                seismic_task, rent_task, traffic_task, flood_task,
+                return_exceptions=True,
             )
-            return json.loads(response.text)
-        except json.JSONDecodeError:
-            logger.error("Gemini returned non-JSON response")
-            return self._fallback_report(address, lat, lng)
+
+            def safe(val: Any) -> Any:
+                return val if not isinstance(val, Exception) else {"error": str(val)}
+
+            prop_data = safe(prop_data)
+            flood_data = flood_data or safe(fetched_flood)
+            seismic_data = safe(seismic_data)
+            rent_data = safe(rent_data)
+            traffic_data = safe(traffic_data)
+
+            crime_data = self._fetch_crime(lat, lng)
+
+            # RAG: Fetch relevant building code snippets based on detected risks
+            rag_queries = ["general property compliance"]
+            if flood_data.get("coastal_plains", {}).get("feature_count", 0) > 0 or \
+               flood_data.get("hamilton_flood_hazard", {}).get("feature_count", 0) > 0:
+                rag_queries.append("Surface water drainage and flood protection E1")
+            
+            if seismic_data.get("immediate_fault_lines", {}).get("feature_count", 0) > 0:
+                rag_queries.append("Structural safety and earthquake resilience B1")
+                
+            rag_context = await self._fetch_rag_context(rag_queries, doc_type="building_code")
+
+            # District Plan RAG: Specifically for Hamilton
+            is_hamilton = 174.9 <= lng <= 175.6 and -38.2 <= lat <= -37.4
+            if is_hamilton:
+                plan_queries = ["residential zoning rules", "building setbacks and height limits", "site coverage"]
+                plan_context = await self._fetch_rag_context(plan_queries, doc_type="district_plan")
+                rag_context += "\n\n### HAMILTON DISTRICT PLAN INSIGHTS:\n" + plan_context
+
+            persona = "friendly and helpful property guide"
+            focus_area = "making the data easy to understand and highlighting what truly matters for your future home" if user_type == "buyer" else "your daily lifestyle, safety, and whether the area is a good fit for you"
+
+            prompt = f"""
+    You are GeoAura NZ – a {persona}. Your goal is to explain property data in simple, plain English for a potential {user_type}.
+
+    ADDRESS: {address}
+    COORDINATES: {lat:.6f}, {lng:.6f}
+
+    Focus specifically on {focus_area}. 
+
+    IMPORTANT: Avoid overly technical jargon. If you must mention a technical term (like 'liquefaction' or 'AADT'), briefly explain what it means in a way a layman would understand.
+
+    Use ONLY the data provided below. Do not invent, embellish, or make assumptions beyond the data.
+    If a data section shows no features or an error, explicitly state "No data available" rather than omitting the section.
+
+    ---
+    ## 1. PROPERTY DATA (LINZ)
+    {json.dumps(prop_data, indent=2, default=str)}
+
+    ## 2. FLOOD & COASTAL RISK (NIWA / Waikato RC)
+    {json.dumps(flood_data, indent=2, default=str)}
+
+    ## 3. SEISMIC & FAULT LINE RISK (GeoNet / GNS Science)
+    {json.dumps(seismic_data, indent=2, default=str)}
+
+    ## 4. CRIME & SAFETY (NZ Police – Feb 2025 to Jan 2026)
+    {json.dumps(crime_data, indent=2, default=str)}
+
+    ## 5. MARKET RENT (Tenancy Services MBIE)
+    {json.dumps(rent_data, indent=2, default=str)}
+    IMPORTANT: Use the EXACT median rent values from the samples above for 2-bedroom and 3-bedroom houses/apartments. Do not hallucinate or use "general" knowledge about the city. If the data says $600 for a 3-bedroom house, use $600.
+
+    ## 6. TRAFFIC & ROAD NOISE DATA (Nearby Arterial & State Highways)
+    {json.dumps(traffic_data, indent=2, default=str)}
+
+    ---
+    ## 7. RELEVANT NZ BUILDING CODE & DISTRICT PLAN SNIPPETS (RAG)
+    {rag_context}
+    ---
+
+    OUTPUT FORMAT – Return valid JSON only, with exactly this structure:
+    {{
+      "title": "string – Property Intelligence Report: <address>",
+      "generated_at": "string – ISO 8601 datetime (UTC)",
+      "address": "string",
+      "coordinates": {{"lat": number, "lng": number}},
+      "executive_summary": "string – 3-4 sentence high-level overview covering the most important findings",
+      "sections": [
+        {{
+          "id": "property",
+          "title": "Property & Title",
+          "icon": "home_pin",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string – factual narrative, 3-6 sentences",
+          "key_facts": ["string", "string"]
+        }},
+        {{
+          "id": "flood",
+          "title": "Flood & Coastal Risk",
+          "icon": "water_damage",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string",
+          "key_facts": ["string"]
+        }},
+        {{
+          "id": "seismic",
+          "title": "Seismic & Fault Line Risk",
+          "icon": "waves",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string",
+          "key_facts": ["string"]
+        }},
+        {{
+          "id": "crime",
+          "title": "Safety & Crime Profile",
+          "icon": "local_police",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string",
+          "key_facts": ["string"]
+        }},
+        {{
+          "id": "rent",
+          "title": "Market Rent & Investment",
+          "icon": "real_estate_agent",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string",
+          "key_facts": ["string"]
+        }},
+        {{
+          "id": "traffic",
+          "title": "Traffic & Accessibility",
+          "icon": "traffic",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string",
+          "key_facts": ["string"]
+        }},
+        {{
+          "id": "regulatory",
+          "title": "Regulatory & Building Code",
+          "icon": "gavel",
+          "risk_level": "low | medium | high | unknown",
+          "content": "string – explain how the building code and district plan snippets apply to the specific risks identified (e.g. earthquake or flood mitigation)",
+          "key_facts": ["string – reference specific code clauses like E1, B1, etc."]
+        }}
+      ],
+      "overall_risk_rating": "low | medium | high",
+      "recommendation": "string – 2-3 sentence overall recommendation specifically tailored for a {user_type}",
+      "disclaimer": "This report is generated by AI using publicly available New Zealand datasets. It is provided for informational purposes only and does not constitute professional legal, financial, or property advice. A registered professional LIM report from the relevant local council should be obtained before making any property purchasing decision."
+    }}
+    """.strip()
+
+            try:
+                response = self._client.models.generate_content(
+                    model="gemini-3-flash-preview",
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                    ),
+                )
+                report = json.loads(response.text)
+                
+                # Ensure the generation timestamp is accurate and in UTC
+                report["generated_at"] = datetime.now(timezone.utc).isoformat()
+
+                if report_id:
+                    self._supabase.update_report(report_id, "COMPLETED", report)
+                return report
+            except json.JSONDecodeError:
+                logger.error("Gemini returned non-JSON response")
+                fallback = self._fallback_report(address, lat, lng)
+                if report_id:
+                    self._supabase.update_report(report_id, "COMPLETED", fallback)
+                return fallback
+            except Exception as exc:
+                logger.error("Gemini report synthesis failed: %s", exc)
+                if report_id:
+                    self._supabase.update_report(report_id, "FAILED")
+                raise
         except Exception as exc:
-            logger.error("Gemini report synthesis failed: %s", exc)
+            logger.exception("Data gathering or synthesis failed")
+            if report_id:
+                self._supabase.update_report(report_id, "FAILED")
             raise
 
     @staticmethod
     def _fallback_report(address: str, lat: float, lng: float) -> dict[str, Any]:
         return {
             "title": f"Property Intelligence Report: {address}",
-            "generated_at": "",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "address": address,
             "coordinates": {"lat": lat, "lng": lng},
             "executive_summary": "Report generation partially failed. Raw data was gathered but synthesis encountered an error.",

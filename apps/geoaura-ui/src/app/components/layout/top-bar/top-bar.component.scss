@@ -3,7 +3,7 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 54px;
+  height: 64px;
   background: rgba(15, 23, 42, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -21,22 +21,73 @@
     gap: 12px;
     cursor: pointer;
 
-    .logo-icon {
-      font-size: 28px;
-      background: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-variation-settings: 'FILL' 1;
+    .logo-img {
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 50%;
+      padding: 4px;
+      box-shadow: 0 0 20px rgba(20, 184, 166, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
     .app-name {
-      font-size: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      font-size: 1.4rem;
       font-weight: 700;
-      letter-spacing: -0.02em;
+      letter-spacing: -0.01em;
       color: #f8fafc;
-      
-      span {
-        color: #14b8a6;
+      line-height: 1;
+
+      .aura {
+        font-weight: 800;
+        letter-spacing: 0.02em;
+      }
+
+      .nz {
+        color: #64748b;
+        font-size: 1rem;
+        font-weight: 700;
+        margin-left: 4px;
+      }
+
+      .expansion {
+        display: flex;
+        gap: 4px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #94a3b8;
+        opacity: 0.8;
+        padding-left: 18px;
+        margin-left: 16px;
+        border-left: 2px solid rgba(255, 255, 255, 0.12);
+        letter-spacing: 0.02em;
+
+        @media (max-width: 1200px) {
+          display: none;
+        }
+      }
+
+
+      .a {
+        color: #1fe0ca;
+      }
+
+      .u {
+        color: #60a5fa
+      }
+
+      .r {
+        color: #ef4444;
+      }
+
+      .a2 {
+        color: #f97316;
       }
     }
   }
@@ -45,6 +96,70 @@
     display: flex;
     align-items: center;
     gap: 16px;
+
+    .reports-nav-btn {
+      background: rgba(20, 184, 166, 0.1);
+      border: 1px solid rgba(20, 184, 166, 0.2);
+      color: #14b8a6;
+      padding: 6px 14px;
+      border-radius: 99px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      font-family: 'Inter', sans-serif;
+
+      &:hover {
+        background: rgba(20, 184, 166, 0.2);
+        border-color: rgba(20, 184, 166, 0.4);
+        transform: translateY(-1px);
+      }
+
+      .material-symbols-outlined {
+        font-size: 20px;
+      }
+
+      .btn-label {
+        font-weight: 600;
+        font-size: 0.85rem;
+
+        @media (max-width: 600px) {
+          display: none;
+        }
+      }
+
+      .report-badge {
+        position: absolute;
+        top: -1px;
+        right: -1px;
+        width: 8px;
+        height: 8px;
+        background: #ef4444;
+        border: 1.5px solid #0f172a;
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+        animation: pulse-dot 2s infinite;
+      }
+    }
+
+    @keyframes pulse-dot {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+
+      50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
 
     .signin-btn {
       background: rgba(255, 255, 255, 0.05);
@@ -89,8 +204,15 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 // User menu
@@ -163,8 +285,15 @@
 }
 
 @keyframes dropdownIn {
-  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .dropdown-user-info {
@@ -211,7 +340,9 @@
   transition: background 0.15s ease;
   color: #94a3b8;
 
-  .material-symbols-outlined { font-size: 18px; }
+  .material-symbols-outlined {
+    font-size: 18px;
+  }
 
   &:hover {
     background: rgba(255, 255, 255, 0.06);
@@ -235,7 +366,7 @@
     .app-name {
       font-size: 1.1rem;
     }
-    
+
     .signin-btn {
       padding: 6px 16px;
       font-size: 0.85rem;

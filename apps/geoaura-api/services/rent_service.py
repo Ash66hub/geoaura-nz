@@ -17,7 +17,7 @@ class RentService:
 
     def __init__(self):
         load_dotenv()
-        # Use Sandbox by default as requested
+        # Use Sandbox environment
         self.api_key = os.getenv("MARKET_RENT_SANDBOX_API_KEY") or os.getenv("MARKET_RENT_API_KEY")
         self.base_url = "https://api.business.govt.nz/sandbox/tenancy-services/market-rent/v2"
         

@@ -184,7 +184,7 @@
 
 .map-mode-switcher {
   position: absolute;
-  bottom: 120px;
+  bottom: 24px;
   left: 24px;
   z-index: 30;
   display: flex;
@@ -277,11 +277,85 @@
 
 @media (max-width: 768px) {
   .address-search-overlay {
-    top: 1rem;
+    top: 72px; // Positioned below the top bar (54px)
     left: 50%;
     transform: translateX(-50%);
-    width: calc(100% - 1rem);
-    padding: 0 0.5rem;
+    width: calc(100% - 1.5rem);
+    padding: 0;
+  }
+}
+
+.mobile-controls-toggle {
+  display: none;
+  position: absolute;
+  top: 132px; // Below the search bar (72px + ~50px search bar height + 10px gap)
+  left: 0.75rem;
+  padding: 0 1rem;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(17, 33, 31, 0.9);
+  backdrop-filter: blur(8px);
+  color: #1fe0ca;
+  border: 1px solid rgba(31, 224, 202, 0.3);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  cursor: pointer;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+
+  .btn-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  &:active {
+    transform: scale(0.97);
+    background: rgba(31, 224, 202, 0.15);
+  }
+
+  .material-symbols-outlined {
+    font-size: 20px;
+    font-variation-settings: 'FILL' 0;
+  }
+
+  @media (max-width: 768px) {
+    display: flex;
+  }
+}
+
+.map-controls-group {
+  display: contents;
+
+  @media (max-width: 768px) {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: absolute;
+    top: 184px; // Below the toggle button
+    left: 0.75rem;
+    z-index: 90;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+    transform-origin: top left;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    &.mobile-open {
+      pointer-events: auto;
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .layer-control-panel,
+    .map-mode-switcher {
+      position: static;
+      margin: 0;
+      width: 240px;
+      background: rgba(13, 25, 23, 0.98);
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+    }
   }
 }
 
@@ -306,7 +380,15 @@
     left: 0;
     right: 0;
     width: 100%;
+    height: auto;
+    max-height: 80dvh;
     transform: none;
     justify-content: center;
+    background: linear-gradient(to top, rgba(15, 23, 42, 0.95), transparent);
+    
+    // Ensure the panel doesn't overlap the mobile toggle if open
+    &.has-selector {
+      z-index: 4000;
+    }
   }
 }

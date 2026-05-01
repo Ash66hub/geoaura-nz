@@ -9,73 +9,83 @@
   </div>
 }
 
-<div class="layer-control-panel">
-  <div class="layer-header">
-    <span class="layer-header-title">Layer Control</span>
+<!-- Mobile Toggle Button -->
+<button class="mobile-controls-toggle" (click)="toggleMobileControls()" aria-label="Toggle Controls">
+  <span class="material-symbols-outlined">
+    {{ isMobileControlsOpen() ? 'close' : 'layers' }}
+  </span>
+  <span class="btn-text">{{ isMobileControlsOpen() ? 'Close' : 'Layers' }}</span>
+</button>
+
+<div class="map-controls-group" [class.mobile-open]="isMobileControlsOpen()">
+  <div class="layer-control-panel">
+    <div class="layer-header">
+      <span class="layer-header-title">Layer Control</span>
+    </div>
+
+    <div class="layer-list">
+      @for (layer of layers(); track layer.id) {
+        <div
+          class="layer-item"
+          [class.active-primary]="layer.active && layer.colorClass === 'primary'"
+          [class.active-orange]="layer.active && layer.colorClass === 'orange'"
+          (click)="toggleLayer(layer.id)"
+          (keydown.enter)="toggleLayer(layer.id)"
+          (keydown.space)="toggleLayer(layer.id)"
+          tabindex="0"
+          role="button"
+        >
+          <div class="layer-info">
+            <span class="material-symbols-outlined layer-icon" [ngClass]="layer.iconColorClass">
+              {{ layer.icon }}
+            </span>
+            <span class="layer-name" [class.text-slate-100]="layer.active">
+              {{ layer.name }}
+            </span>
+          </div>
+          <div
+            class="toggle-track"
+            [class.on-primary]="layer.active && layer.colorClass === 'primary'"
+            [class.on-orange]="layer.active && layer.colorClass === 'orange'"
+          >
+            <div class="toggle-knob"></div>
+          </div>
+        </div>
+      }
+    </div>
   </div>
 
-  <div class="layer-list">
-    @for (layer of layers(); track layer.id) {
+  <div class="map-mode-switcher">
+    <div class="mode-options-row">
       <div
-        class="layer-item"
-        [class.active-primary]="layer.active && layer.colorClass === 'primary'"
-        [class.active-orange]="layer.active && layer.colorClass === 'orange'"
-        (click)="toggleLayer(layer.id)"
-        (keydown.enter)="toggleLayer(layer.id)"
-        (keydown.space)="toggleLayer(layer.id)"
+        class="mode-option"
+        [class.active]="currentMapMode() === 'topo'"
+        (click)="toggleMapMode('topo')"
+        (keydown.enter)="toggleMapMode('topo')"
+        (keydown.space)="toggleMapMode('topo')"
         tabindex="0"
         role="button"
       >
-        <div class="layer-info">
-          <span class="material-symbols-outlined layer-icon" [ngClass]="layer.iconColorClass">
-            {{ layer.icon }}
-          </span>
-          <span class="layer-name" [class.text-slate-100]="layer.active">
-            {{ layer.name }}
-          </span>
-        </div>
-        <div
-          class="toggle-track"
-          [class.on-primary]="layer.active && layer.colorClass === 'primary'"
-          [class.on-orange]="layer.active && layer.colorClass === 'orange'"
-        >
-          <div class="toggle-knob"></div>
-        </div>
+        <img src="/assets/map-modes/topo.png" alt="Map mode" />
+        <span class="mode-label">Map</span>
       </div>
-    }
-  </div>
-</div>
-
-<div class="map-mode-switcher">
-  <div class="mode-options-row">
-    <div
-      class="mode-option"
-      [class.active]="currentMapMode() === 'topo'"
-      (click)="toggleMapMode('topo')"
-      (keydown.enter)="toggleMapMode('topo')"
-      (keydown.space)="toggleMapMode('topo')"
-      tabindex="0"
-      role="button"
-    >
-      <img src="/assets/map-modes/topo.png" alt="Map mode" />
-      <span class="mode-label">Map</span>
+      <div
+        class="mode-option"
+        [class.active]="currentMapMode() === 'satellite'"
+        (click)="toggleMapMode('satellite')"
+        (keydown.enter)="toggleMapMode('satellite')"
+        (keydown.space)="toggleMapMode('satellite')"
+        tabindex="0"
+        role="button"
+      >
+        <img src="/assets/map-modes/satellite.png" alt="Satellite mode" />
+        <span class="mode-label">Satellite</span>
+      </div>
     </div>
-    <div
-      class="mode-option"
-      [class.active]="currentMapMode() === 'satellite'"
-      (click)="toggleMapMode('satellite')"
-      (keydown.enter)="toggleMapMode('satellite')"
-      (keydown.space)="toggleMapMode('satellite')"
-      tabindex="0"
-      role="button"
-    >
-      <img src="/assets/map-modes/satellite.png" alt="Satellite mode" />
-      <span class="mode-label">Satellite</span>
-    </div>
-  </div>
 
-  <div class="zoom-level-display" aria-live="polite">
-    <span>Zoom Level: {{ zoomLevel().toFixed(1) }}</span>
+    <div class="zoom-level-display" aria-live="polite">
+      <span>Zoom Level: {{ zoomLevel().toFixed(1) }}</span>
+    </div>
   </div>
 </div>
 @if (selectedGauge()) {

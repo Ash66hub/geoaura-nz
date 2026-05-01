@@ -1,6 +1,7 @@
 import { Component, inject, signal, HostListener, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AuthService } from '../../../services/auth.service';
+import { ReportService } from '../../../services/report.service';
 import { AuthModalComponent } from '../../feature/auth-modal/auth-modal.component';
 
 @Component({
@@ -12,9 +13,14 @@ import { AuthModalComponent } from '../../feature/auth-modal/auth-modal.componen
 })
 export class TopBarComponent {
   protected authService = inject(AuthService);
+  protected reportService = inject(ReportService);
   private elRef = inject(ElementRef);
 
   showUserMenu = signal(false);
+
+  toggleReportsPanel() {
+    this.reportService.isReportsPanelOpen.update(v => !v);
+  }
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent) {

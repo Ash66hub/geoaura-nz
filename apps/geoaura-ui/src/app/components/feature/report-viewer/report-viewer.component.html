@@ -19,8 +19,8 @@
             <span class="material-symbols-outlined risk-icon">shield</span>
             <span>{{ riskLabel(report.overall_risk_rating) }}</span>
           </div>
-          <button class="icon-btn" (click)="onPrint()" title="Print Report" aria-label="Print Report">
-            <span class="material-symbols-outlined">print</span>
+          <button class="icon-btn" (click)="onDownloadPDF()" title="Download PDF" aria-label="Download PDF">
+            <span class="material-symbols-outlined">download</span>
           </button>
           <button class="icon-btn close-btn" (click)="onClose()" title="Close" aria-label="Close Report">
             <span class="material-symbols-outlined">close</span>
@@ -89,7 +89,7 @@
           </div>
           <div class="footer-brand">
             <span class="material-symbols-outlined">satellite_alt</span>
-            <span>GeoAura NZ · AI Property Intelligence</span>
+            <span>GeoAura NZ · Agentic Urban Risk Analysis</span>
           </div>
         </footer>
 

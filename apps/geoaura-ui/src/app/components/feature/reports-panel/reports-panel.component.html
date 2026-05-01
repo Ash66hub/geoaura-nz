@@ -1,0 +1,72 @@
+<div class="reports-panel-overlay" (click)="onClose()">
+  <div class="reports-panel-container" (click)="$event.stopPropagation()">
+    <div class="panel-header">
+      <div class="header-title">
+        <span class="material-symbols-outlined">analytics</span>
+        <h2>Aura Reports</h2>
+      </div>
+      <button class="close-btn" (click)="onClose()">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+
+    <div class="panel-content">
+      @if (!authService.isLoggedIn()) {
+        <div class="empty-state">
+          <span class="material-symbols-outlined large-icon">lock</span>
+          <p>Please sign in to view your report history.</p>
+          <button class="primary-btn" (click)="authService.openAuthModal()">Sign In</button>
+        </div>
+      } @else if (reportService.isFetching() && reportService.reports().length === 0) {
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Loading your reports...</p>
+        </div>
+      } @else if (reportService.reports().length === 0) {
+        <div class="empty-state">
+          <span class="material-symbols-outlined large-icon">history</span>
+          <p>No reports generated yet.</p>
+          <p class="subtitle">Select a property on the map to generate an intelligence report.</p>
+        </div>
+      } @else {
+        <div class="reports-list">
+          @for (report of reportService.reports(); track report.id) {
+            <div class="report-item" 
+                 [class.completed]="report.status === 'COMPLETED'"
+                 [class.clickable]="report.status === 'COMPLETED'"
+                 (click)="onOpenReport(report)">
+              <div class="report-info">
+                <div class="report-address">{{ report.address }}</div>
+                <div class="report-meta">
+                  <span class="report-date">{{ formatDate(report.created_at) }}</span>
+                  <span class="dot">·</span>
+                  <span class="report-type">{{ report.user_type | titlecase }}</span>
+                </div>
+              </div>
+              
+              <div class="report-status" [ngClass]="getStatusClass(report.status)">
+                @if (report.status === 'PROCESSING') {
+                  <div class="spinner-small"></div>
+                } @else {
+                  <span class="material-symbols-outlined status-icon">
+                    {{ getStatusIcon(report.status) }}
+                  </span>
+                }
+                <span class="status-text">{{ report.status | titlecase }}</span>
+              </div>
+
+              <div class="report-actions">
+                @if (report.status === 'COMPLETED') {
+                  <span class="material-symbols-outlined open-icon">chevron_right</span>
+                }
+                <button class="delete-btn" (click)="onDeleteReport($event, report)" title="Delete Report">
+                  <span class="material-symbols-outlined">delete</span>
+                </button>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+</div>

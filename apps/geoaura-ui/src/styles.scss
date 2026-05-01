@@ -26,3 +26,32 @@ textarea,
 ::file-selector-button {
 	font: revert;
 }
+
+// ─── Print Styles ────────────────────────────────────────────────────────────
+@media print {
+  // Hide all main UI elements
+  app-top-bar,
+  app-map-explorer,
+  app-detail-panel,
+  app-reports-panel,
+  .map-container,
+  .search-wrapper,
+  .layer-control,
+  #map-view {
+    display: none !important;
+  }
+
+  // Ensure body is visible and background is white
+  html, body {
+    overflow: visible !important;
+    height: auto !important;
+    background: white !important;
+  }
+
+  // Only the report viewer should be visible
+  app-report-viewer {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+  }
+}

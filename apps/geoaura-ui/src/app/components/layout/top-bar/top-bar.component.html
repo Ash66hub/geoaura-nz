@@ -1,10 +1,31 @@
 <header class="top-bar">
   <div class="brand">
-    <span class="material-symbols-outlined logo-icon">auto_awesome</span>
-    <h1 class="app-name">GeoAura <span>NZ</span></h1>
+    <img src="/assets/logo_without_text_small.png" alt="GeoAura Logo" class="logo-img">
+    <h1 class="app-name">
+      Geo<span class="aura">
+        <span class="a">A</span><span class="u">U</span><span class="r">R</span><span class="a2">A</span>
+      </span>
+      <span class="nz">NZ</span>
+      <span class="expansion">
+        <span class="a">Agentic</span>
+        <span class="u">Urban</span>
+        <span class="r">Risk</span>
+        <span class="a2">Analysis</span>
+      </span>
+    </h1>
   </div>
 
   <div class="actions">
+    @if (authService.isLoggedIn()) {
+      <button class="reports-nav-btn" (click)="toggleReportsPanel()" title="Aura Reports">
+        <span class="material-symbols-outlined">analytics</span>
+        <span class="btn-label">Reports</span>
+        @if (reportService.isAnyReportProcessing()) {
+          <span class="report-badge"></span>
+        }
+      </button>
+    }
+
     @if (authService.loading()) {
       <div class="avatar-skeleton"></div>
     } @else if (authService.isLoggedIn()) {

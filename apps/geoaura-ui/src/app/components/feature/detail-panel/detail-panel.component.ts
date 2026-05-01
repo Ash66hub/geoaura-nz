@@ -208,19 +208,15 @@ export class DetailPanelComponent {
       .replace(/\.+$/, '')
       .trim();
 
-    // Fetch fresh flood data on-demand (browser-side) before generating the report.
-    // This ensures NIWA data is included even if the map layer is not active.
-    const floodData = await this.floodDataService.fetchForCoords(
-      this.model.coords.lat,
-      this.model.coords.lng
-    );
-
+    // Start report generation instantly. 
+    // The backend AgentService will handle data gathering (including flood data where possible)
+    // to avoid blocking the UI with browser-side fetches.
     this.reportService.generateReport(
       this.model.coords.lat,
       this.model.coords.lng,
       primaryAddress,
       type,
-      floodData
+      null // Pass null, let the backend handle it
     ).subscribe();
   }
 }

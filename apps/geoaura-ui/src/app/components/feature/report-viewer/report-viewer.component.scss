@@ -386,30 +386,106 @@
 
 // ─── Print ───────────────────────────────────────────────────────────────────
 @media print {
+  @page {
+    margin: 1cm;
+    size: A4;
+  }
+
+  body {
+    background: white !important;
+  }
+
   .report-overlay {
-    position: static;
-    background: white;
-    padding: 0;
-    display: block;
+    position: static !important;
+    inset: 0;
+    background: white !important;
+    padding: 0 !important;
+    display: block !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    z-index: auto !important;
   }
 
   .report-container {
+    max-width: none;
     max-height: none;
     border: none;
     box-shadow: none;
-    background: white;
+    background: white !important;
     animation: none;
+    width: 100%;
+    position: static;
+  }
+
+  .report-body {
+    overflow: visible;
+    padding: 0;
+  }
+
+  .report-header {
+    background: #f8fafc !important;
+    border-bottom: 2px solid #e2e8f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    
+    .header-icon-wrap {
+      background: linear-gradient(135deg, #6366f1, #a855f7) !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    h1, .report-address, .report-meta {
+      color: #0f172a !important;
+    }
   }
 
   .risk-grid {
     grid-template-columns: 1fr 1fr;
+    display: grid !important;
+    gap: 1.5rem;
+  }
+
+  .risk-card {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-left: 4px solid var(--risk-color) !important;
+    page-break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+
+    h3, .risk-card-content, .key-facts-list li {
+      color: #334155 !important;
+    }
+  }
+
+  .exec-summary-section {
+    background: #f1f5f9 !important;
+    border: 1px solid #e2e8f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    
+    p { color: #334155 !important; }
+    h2 { color: #4f46e5 !important; }
+  }
+
+  .recommendation-section {
+    background: #f0fdf4 !important;
+    border: 1px solid #dcfce7 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+
+    p { color: #166534 !important; }
+    h2 { color: #15803d !important; }
   }
 
   .header-actions { display: none; }
 
-  * {
-    color: #1e293b !important;
-    background: white !important;
-    border-color: #e2e8f0 !important;
+  .disclaimer {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    
+    p { color: #64748b !important; }
   }
 }

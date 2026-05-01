@@ -3,6 +3,8 @@ import { Subscription } from 'rxjs';
 import { RentService } from '../../../services/rent.service';
 import { clampBoundsToNz } from './map-explorer.utils';
 
+import { finalize } from 'rxjs/operators';
+
 interface RentLayerControllerDeps {
   map: maplibregl.Map;
   rentService: RentService;

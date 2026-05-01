@@ -8,7 +8,11 @@ import {
   computed,
   NgZone,
   effect,
+  AfterViewInit,
+  OnDestroy,
 } from '@angular/core';
+import { of, Subscription } from 'rxjs';
+import { finalize, switchMap, catchError } from 'rxjs/operators';
 import * as maplibregl from 'maplibre-gl';
 import { LngLatBoundsLike } from 'maplibre-gl';
 import { environment } from '../../../../environments/environment';
@@ -59,7 +63,7 @@ const POLICE_MIN_ZOOM = 8;
   templateUrl: './map-explorer.component.html',
   styleUrl: './map-explorer.component.scss',
 })
-export class MapExplorerComponent implements OnInit {
+export class MapExplorerComponent implements OnInit, AfterViewInit, OnDestroy {
   private static readonly PROPERTY_BOUNDARY_SOURCE_ID = 'property-boundary-source';
   private static readonly PROPERTY_BOUNDARY_FILL_LAYER_ID = 'property-boundary-fill';
   private static readonly PROPERTY_BOUNDARY_LINE_LAYER_ID = 'property-boundary-line';
@@ -75,6 +79,12 @@ export class MapExplorerComponent implements OnInit {
   private rentService = inject(RentService);
   public reportService = inject(ReportService);
   
+  isMobileControlsOpen = signal(false);
+
+  toggleMobileControls() {
+    this.isMobileControlsOpen.update(v => !v);
+  }
+
   constructor() {
     effect(() => {
       const isLocked = this.reportService.isSelectorOpen() || !!this.reportService.currentReport();
@@ -368,6 +378,7 @@ export class MapExplorerComponent implements OnInit {
   private map?: maplibregl.Map;
   private searchResultMarker: maplibregl.Marker | null = null;
   private boundaryCandidateLayerIds: string[] = [];
+  private resizeObserver?: ResizeObserver;
 
   private policeLayerController?: PoliceLayerController;
   private seismicLayerController?: SeismicLayerController;
@@ -531,9 +542,16 @@ export class MapExplorerComponent implements OnInit {
     this.trafficLayerController?.updateVisibility();
   }
 
-  ngOnInit() {
+  ngOnInit() {}
+
+  ngAfterViewInit() {
     const container = this.mapContainer()?.nativeElement;
     if (!container) return;
+
+    this.initMap(container);
+  }
+
+  private initMap(container: HTMLElement) {
 
     const map = new maplibregl.Map({
       container,
@@ -607,6 +625,17 @@ export class MapExplorerComponent implements OnInit {
     });
     map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
+    // Robust resize handling for Safari and dynamic layouts
+    this.resizeObserver = new ResizeObserver(() => {
+      this.ngZone.run(() => {
+        map.resize();
+      });
+    });
+    this.resizeObserver.observe(container);
+
+    // Initial resize trigger to ensure map takes full container size
+    setTimeout(() => map.resize(), 0);
+
     this.zoomLevel.set(Number(map.getZoom().toFixed(1)));
     map.on('zoom', () => {
       this.ngZone.run(() => {
@@ -618,6 +647,14 @@ export class MapExplorerComponent implements OnInit {
     map.on('load', () => {
       this.initBasemapLayers(map);
       this.initPropertyBoundaryLayers(map);
+      
+      // Initial data refresh on load
+      this.refreshFloodInView();
+      this.refreshTrafficInView();
+      this.refreshAddressesInView(map);
+      this.refreshSeismicInView();
+      this.refreshPoliceInView();
+      this.refreshRentInView();
 
       map.on('moveend', () => {
         this.refreshFloodInView();
@@ -628,6 +665,13 @@ export class MapExplorerComponent implements OnInit {
         this.refreshRentInView();
       });
     });
+  }
+
+  ngOnDestroy() {
+    this.resizeObserver?.disconnect();
+    if (this.map) {
+      this.map.remove();
+    }
   }
 
   private initBasemapLayers(map: maplibregl.Map) {
@@ -1342,17 +1386,20 @@ export class MapExplorerComponent implements OnInit {
     this.tooltipHandlersBound = true;
   }
 
+  private rentStatsSubscription?: Subscription;
+
   private fetchRentStats(suburbName: string) {
     this.rentStatsLoading.set(true);
     this.rentStatistics.set(null);
 
-    // First, get area definitions to find the ID for this suburb
-    this.rentService.getAreaDefinitions().subscribe({
-      next: (areas) => {
-        // Try exact match first
+    if (this.rentStatsSubscription) {
+      this.rentStatsSubscription.unsubscribe();
+    }
+
+    this.rentStatsSubscription = this.rentService.getAreaDefinitions().pipe(
+      switchMap((areas) => {
         let area = areas.find((a) => a.name.toLowerCase() === suburbName.toLowerCase());
 
-        // If not found, try partial match with the full string
         if (!area) {
           area = areas.find(
             (a) =>
@@ -1361,11 +1408,9 @@ export class MapExplorerComponent implements OnInit {
           );
         }
 
-        // If still not found, and we have a "City - Suburb" format, try just the Suburb
         if (!area && suburbName.includes(' - ')) {
           const parts = suburbName.split(' - ');
           const justSuburb = parts[parts.length - 1].trim();
-
           area = areas.find(
             (a) =>
               a.name.toLowerCase().includes(justSuburb.toLowerCase()) ||
@@ -1373,36 +1418,33 @@ export class MapExplorerComponent implements OnInit {
           );
         }
 
-        // Final fallback: Try "{City} - all other suburbs"
         if (!area && suburbName.includes(' - ')) {
           const parts = suburbName.split(' - ');
           const city = parts[0].trim();
           const fallbackName = `${city} - all other suburbs`.toLowerCase();
-          
           area = areas.find((a) => a.name.toLowerCase() === fallbackName);
         }
 
         if (area) {
-          // Use the code (area-definition) for the statistics call as it is more reliable than the label
-          this.rentService.getRentStatistics(area['area-definition']).subscribe({
-            next: (stats) => {
-              this.rentStatistics.set(stats);
-              this.rentStatsLoading.set(false);
-            },
-            error: (err) => {
-              console.error('Rent statistics: error fetching stats', err);
-              this.rentStatsLoading.set(false);
-            },
-          });
+          return this.rentService.getRentStatistics(area['area-definition']);
         } else {
           console.warn('Rent statistics: no matching area found for', suburbName);
-          this.rentStatsLoading.set(false);
+          return of(null);
         }
-      },
-      error: (err) => {
-        console.error('Rent statistics: error fetching area definitions', err);
+      }),
+      catchError((err) => {
+        console.error('Rent statistics error:', err);
+        return of(null);
+      }),
+      finalize(() => {
         this.rentStatsLoading.set(false);
-      },
+      })
+    ).subscribe({
+      next: (stats) => {
+        if (stats) {
+          this.rentStatistics.set(stats);
+        }
+      }
     });
   }
 
