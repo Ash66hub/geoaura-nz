@@ -15,7 +15,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200", "https://geoaura.co.nz"],
+    allow_origins=["http://localhost:4200", "https://geoaura.aswanth.net"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
