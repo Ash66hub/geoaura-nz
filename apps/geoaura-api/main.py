@@ -27,6 +27,7 @@ app.include_router(api_router, prefix="/api/v1")
 def root():
     return {"message": "GeoAura API Initialized"}
 
-@app.get("/status", tags=["General"])
-def status():
+@app.get("/health", tags=["General"])
+@app.head("/health", tags=["General"])
+def health():
     return {"status": "active"}
