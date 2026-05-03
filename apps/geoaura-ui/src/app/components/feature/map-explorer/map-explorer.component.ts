@@ -555,7 +555,7 @@ export class MapExplorerComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const map = new maplibregl.Map({
       container,
-      style: `https://basemaps.linz.govt.nz/v1/styles/topographic-v2.json?api=${environment.linzApiKey}&tileMatrix=WebMercatorQuad`,
+      style: `${environment.apiUrl}/proxy/linz-basemaps/styles/topographic-v2.json?tileMatrix=WebMercatorQuad`,
       center: [172.5, -41.5],
       zoom: 5,
       maxBounds: NZ_BOUNDS,
@@ -680,7 +680,7 @@ export class MapExplorerComponent implements OnInit, AfterViewInit, OnDestroy {
     map.addSource('nz-aerial', {
       type: 'raster',
       tiles: [
-        `https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api=${environment.linzApiKey}`,
+        `${environment.apiUrl}/proxy/linz-basemaps/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp`,
       ],
       tileSize: 256,
       attribution: '&copy; <a href="https://www.linz.govt.nz/">LINZ</a>',
