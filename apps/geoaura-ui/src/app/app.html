@@ -1,13 +1,1 @@
-<app-top-bar></app-top-bar>
-<app-map-explorer></app-map-explorer>
-
-@if (reportService.currentReport(); as report) {
-  <app-report-viewer 
-    [report]="report" 
-    (close)="reportService.clearReport()">
-  </app-report-viewer>
-}
-
-@if (reportService.isReportsPanelOpen()) {
-  <app-reports-panel></app-reports-panel>
-}
+<router-outlet></router-outlet>

@@ -19,7 +19,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    cursor: pointer;
+
 
     .logo-img {
       width: 48px;
@@ -30,6 +30,7 @@
       padding: 4px;
       box-shadow: 0 0 20px rgba(20, 184, 166, 0.15);
       border: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: pointer;
     }
 
     .app-name {
@@ -43,10 +44,12 @@
       letter-spacing: -0.01em;
       color: #f8fafc;
       line-height: 1;
+      cursor: pointer;
 
       .aura {
         font-weight: 800;
         letter-spacing: 0.02em;
+        opacity: 0.75;
       }
 
       .nz {
@@ -62,13 +65,14 @@
         font-size: 0.95rem;
         font-weight: 600;
         color: #94a3b8;
-        opacity: 0.8;
+        opacity: 0.75;
         padding-left: 18px;
         margin-left: 16px;
         border-left: 2px solid rgba(255, 255, 255, 0.12);
         letter-spacing: 0.02em;
+        cursor: default;
 
-        @media (max-width: 1200px) {
+        @media (max-width: 1000px) {
           display: none;
         }
       }

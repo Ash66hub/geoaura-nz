@@ -9,11 +9,10 @@ import { inject } from '@angular/core';
 
 @Component({
   selector: 'app-root',
-  imports: [MapExplorerComponent, ReportViewerComponent, ReportsPanelComponent, TopBarComponent],
+  imports: [RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
 export class App {
   protected readonly title = signal('geoaura-ui');
-  public reportService = inject(ReportService);
 }

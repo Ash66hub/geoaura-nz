@@ -70,14 +70,14 @@
             <span class="spinner"></span>
           } @else {
             <span class="material-symbols-outlined">send</span>
-            Send magic link
+            Send Auth link
           }
         </button>
 
         <p class="terms">
           By signing in, you agree to our
-          <a href="#" tabindex="-1">Terms of Service</a> and
-          <a href="#" tabindex="-1">Privacy Policy</a>.
+          <a routerLink="/terms-of-service" target="_blank" tabindex="-1">Terms of Service</a> and
+          <a routerLink="/privacy-policy" target="_blank" tabindex="-1">Privacy Policy</a>.
         </p>
       </div>
     }
@@ -85,7 +85,7 @@
     @if (view() === 'magic-link-sent') {
       <div class="modal-header">
         <div class="modal-brand">
-          <span class="material-symbols-outlined brand-icon">auto_awesome</span>
+          <img src="/assets/logo_without_text_small.png" alt="GeoAura Logo" class="brand-logo">
           <span class="brand-name">GeoAura <span>NZ</span></span>
         </div>
         <button class="close-btn" (click)="close.emit()" aria-label="Close">

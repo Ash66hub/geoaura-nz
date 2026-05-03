@@ -1,6 +1,7 @@
 import { Component, inject, signal, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterModule } from '@angular/router';
 import { AuthService } from '../../../services/auth.service';
 
 type AuthView = 'login' | 'magic-link-sent';
@@ -8,7 +9,7 @@ type AuthView = 'login' | 'magic-link-sent';
 @Component({
   selector: 'app-auth-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterModule],
   templateUrl: './auth-modal.component.html',
   styleUrl: './auth-modal.component.scss',
 })
@@ -49,7 +50,7 @@ export class AuthModalComponent {
       this.sentEmail.set(emailVal);
       this.view.set('magic-link-sent');
     } catch (err: any) {
-      this.errorMsg.set(err?.message ?? 'Failed to send magic link. Try again.');
+      this.errorMsg.set(err?.message ?? 'Failed to send supabase auth link. Try again.');
     } finally {
       this.isLoading.set(false);
     }
