@@ -424,16 +424,12 @@ class AgentService:
 
             # RAG: Fetch relevant building code snippets based on detected risks
             rag_queries = ["general property compliance"]
-            if flood_data.get("coastal_plains", {}).get("feature_count", 0) > 0 or \
-               flood_data.get("hamilton_flood_hazard", {}).get("feature_count", 0) > 0:
-            # --- Pruning Data for Memory Efficiency ---
-            if isinstance(prop_data, dict) and "features" in prop_data:
-                prop_data = prop_data["features"][0].get("properties", {}) if prop_data["features"] else {}
-            
-            # Crime data is already a summary, but let's ensure it exists
+            if (isinstance(flood_data, dict) and 
+                (flood_data.get("coastal_plains", {}).get("feature_count", 0) > 0 or 
+                 flood_data.get("hamilton_flood_hazard", {}).get("feature_count", 0) > 0)):
                 rag_queries.append("Surface water drainage and flood protection E1")
             
-            if seismic_data.get("immediate_fault_lines", {}).get("feature_count", 0) > 0:
+            if isinstance(seismic_data, dict) and seismic_data.get("immediate_fault_lines", {}).get("feature_count", 0) > 0:
                 rag_queries.append("Structural safety and earthquake resilience B1")
                 
             rag_context = await self._fetch_rag_context(rag_queries, doc_type="building_code")
@@ -558,7 +554,6 @@ class AgentService:
     """.strip()
 
             try:
-                response = self._client.models.generate_content(
                 import gc
                 response = self._client.models.generate_content(
                     model="gemini-3-flash-preview",
@@ -573,7 +568,8 @@ class AgentService:
                 del prompt
                 del rag_context
                 gc.collect()
-eport = json.loads(response.text)
+
+                report = json.loads(response.text)
                 
                 # Ensure the generation timestamp is accurate and in UTC
                 report["generated_at"] = datetime.now(timezone.utc).isoformat()
