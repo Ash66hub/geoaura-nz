@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import ssl
+import time
 import urllib.parse
 import urllib.request
 import httpx
@@ -12,6 +13,8 @@ from typing import Any, Optional
 
 class PoliceService:
     """Aggregate NZ Police victimisation data for meshblock-level analytics."""
+
+    _CACHE_TTL_SECONDS = 3600.0
 
     MESHBLOCK_2025_QUERY_URL = (
         "https://services2.arcgis.com/vKb0s8tBIA3bdocZ/arcgis/rest/services/"
@@ -35,6 +38,13 @@ class PoliceService:
         )
         self._aggregated_cache: dict[str, dict[str, int]] | None = None
         self._population_cache: dict[str, float] | None = None
+        self._aggregated_cache_time: float | None = None
+        self._population_cache_time: float | None = None
+
+    def _cache_expired(self, cached_at: Optional[float]) -> bool:
+        if cached_at is None:
+            return True
+        return (time.time() - cached_at) > self._CACHE_TTL_SECONDS
 
     def _get_csv_text(self) -> str:
         """Get CSV content from local file or remote URL."""
@@ -140,8 +150,12 @@ class PoliceService:
         return self.build_geojson_for_api_response(aggregated_data)
 
     def get_aggregated_data(self) -> dict[str, dict[str, int]]:
+        if self._cache_expired(self._aggregated_cache_time):
+            self._aggregated_cache = None
+
         if self._aggregated_cache is None:
             self._aggregated_cache = self.parse_police_csv()
+            self._aggregated_cache_time = time.time()
         return self._aggregated_cache
 
     @staticmethod
@@ -159,7 +173,7 @@ class PoliceService:
             return None
 
     def get_population_data(self) -> dict[str, float]:
-        if self._population_cache is not None:
+        if not self._cache_expired(self._population_cache_time) and self._population_cache is not None:
             return self._population_cache
 
         population_map: dict[str, float] = {}
@@ -190,6 +204,7 @@ class PoliceService:
                 population_map[meshblock] = total_population
 
         self._population_cache = population_map
+        self._population_cache_time = time.time()
         return population_map
 
     @staticmethod

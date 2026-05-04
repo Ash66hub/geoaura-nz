@@ -270,7 +270,7 @@ class AgentService:
 
             return {
                 "matched_area": target_area_name,
-                "rent_samples": summary[:15]
+                "rent_samples": summary[:10]
             }
         except Exception as exc:
             logger.warning("Rent data fetch failed: %s", exc)
@@ -286,48 +286,48 @@ class AgentService:
             'AADT', 'Average_AADT', 'ADT', 'aadt', 'adt'
         ]
 
-        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "GeoAura/0.1.0"}) as client:
-            # 1. NZTA State Highways
-            sh_url = self._traffic.get_query_url_with_bbox(TRAFFIC_LINES_URL, bbox, limit=30)
-            
-            # 2. Hamilton Local (Points) - EnvelopeIntersects is much more reliable for points
-            h_url = self._traffic.get_query_url_with_bbox(
-                TRAFFIC_HAMILTON_POINTS_URL, 
-                bbox, 
-                limit=30,
-                spatial_rel="esriSpatialRelEnvelopeIntersects"
-            )
-            
-            for source_name, url in [("State Highway", sh_url), ("Hamilton Local", h_url)]:
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    features = data.get("features", [])
+        client = self._http_client
+        # 1. NZTA State Highways
+        sh_url = self._traffic.get_query_url_with_bbox(TRAFFIC_LINES_URL, bbox, limit=30)
+        
+        # 2. Hamilton Local (Points) - EnvelopeIntersects is much more reliable for points
+        h_url = self._traffic.get_query_url_with_bbox(
+            TRAFFIC_HAMILTON_POINTS_URL, 
+            bbox, 
+            limit=30,
+            spatial_rel="esriSpatialRelEnvelopeIntersects"
+        )
+        
+        for source_name, url in [("State Highway", sh_url), ("Hamilton Local", h_url)]:
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                features = data.get("features", [])
+                
+                found_in_source = 0
+                for f in features:
+                    props = f.get("properties", {})
+                    aadt_val = next((props.get(field) for field in aadt_fields if props.get(field)), None)
                     
-                    found_in_source = 0
-                    for f in features:
-                        props = f.get("properties", {})
-                        aadt_val = next((props.get(field) for field in aadt_fields if props.get(field)), None)
+                    if aadt_val:
+                        road_name = props.get("RoadName") or props.get("roadname") or \
+                                   props.get("Site_Location") or props.get("Site_Name") or \
+                                   props.get("name") or props.get("Name") or "Nearby Road"
                         
-                        if aadt_val:
-                            road_name = props.get("RoadName") or props.get("roadname") or \
-                                       props.get("Site_Location") or props.get("Site_Name") or \
-                                       props.get("name") or props.get("Name") or "Nearby Road"
-                            
-                            all_segments.append({
-                                "road_name": road_name,
-                                "traffic_volume_aadt": aadt_val,
-                                "source": source_name
-                            })
-                except Exception as exc:
-                    logger.warning(f"Traffic fetch failed for {source_name}: {exc}")
+                        all_segments.append({
+                            "road_name": road_name,
+                            "traffic_volume_aadt": aadt_val,
+                            "source": source_name
+                        })
+            except Exception as exc:
+                logger.warning(f"Traffic fetch failed for {source_name}: {exc}")
 
         all_segments.sort(key=lambda x: float(x["traffic_volume_aadt"]) if str(x["traffic_volume_aadt"]).replace('.','',1).isdigit() else 0, reverse=True)
         
         return {
             "description": "Nearby road traffic volumes (AADT). Higher values indicate busier and potentially noisier roads.",
-            "nearby_segments": all_segments[:15]
+            "nearby_segments": all_segments[:10]
         }
 
     # ------------------------------------------------------------------ #
@@ -368,7 +368,11 @@ class AgentService:
         
         context = "\n\n---\n\n".join(all_snippets)
         # Cap context size to prevent prompt ballooning
-        return context[:5000]
+        return context[:3000]
+
+    @staticmethod
+    def _compact_json(value: Any) -> str:
+        return json.dumps(value, separators=(",", ":"), default=str)
 
     # ------------------------------------------------------------------ #
     #  Report synthesis                                                    #
@@ -389,21 +393,26 @@ class AgentService:
             suburb = prop_data.get("suburb_locality")
             council = prop_data.get("territorial_authority")
 
-            rent_task = asyncio.create_task(self._fetch_rent(lat, lng, suburb=suburb, council=council))
-            seismic_task = asyncio.create_task(self._fetch_seismic(lat, lng))
-            traffic_task = asyncio.create_task(self._fetch_traffic(lat, lng))
+            rent_task = self._fetch_rent(lat, lng, suburb=suburb, council=council)
+            seismic_task = self._fetch_seismic(lat, lng)
+            traffic_task = self._fetch_traffic(lat, lng)
 
             # Use client-provided flood data if available
             async def _client_flood() -> dict:
                 return flood_data  # type: ignore[return-value]
 
             if flood_data:
-                flood_task = asyncio.create_task(_client_flood())
+                flood_task = _client_flood()
             else:
-                flood_task = asyncio.create_task(self._fetch_flood(lat, lng))
+                flood_task = self._fetch_flood(lat, lng)
 
-            seismic_data, rent_data, traffic_data, fetched_flood = await asyncio.gather(
-                seismic_task, rent_task, traffic_task, flood_task,
+            seismic_data, fetched_flood = await asyncio.gather(
+                seismic_task, flood_task,
+                return_exceptions=True,
+            )
+
+            rent_data, traffic_data = await asyncio.gather(
+                rent_task, traffic_task,
                 return_exceptions=True,
             )
 
@@ -440,6 +449,7 @@ class AgentService:
                 plan_queries = ["residential zoning rules", "building setbacks and height limits", "site coverage"]
                 plan_context = await self._fetch_rag_context(plan_queries, doc_type="district_plan")
                 rag_context += "\n\n### HAMILTON DISTRICT PLAN INSIGHTS:\n" + plan_context
+                rag_context = rag_context[:3500]
 
             persona = "friendly and helpful property guide"
             focus_area = "making the data easy to understand and highlighting what truly matters for your future home" if user_type == "buyer" else "your daily lifestyle, safety, and whether the area is a good fit for you"
@@ -459,23 +469,23 @@ class AgentService:
 
     ---
     ## 1. PROPERTY DATA (LINZ)
-    {json.dumps(prop_data, indent=2, default=str)}
+    {self._compact_json(prop_data)}
 
     ## 2. FLOOD & COASTAL RISK (NIWA / Waikato RC)
-    {json.dumps(flood_data, indent=2, default=str)}
+    {self._compact_json(flood_data)}
 
     ## 3. SEISMIC & FAULT LINE RISK (GeoNet / GNS Science)
-    {json.dumps(seismic_data, indent=2, default=str)}
+    {self._compact_json(seismic_data)}
 
     ## 4. CRIME & SAFETY (NZ Police – Feb 2025 to Jan 2026)
-    {json.dumps(crime_data, indent=2, default=str)}
+    {self._compact_json(crime_data)}
 
     ## 5. MARKET RENT (Tenancy Services MBIE)
-    {json.dumps(rent_data, indent=2, default=str)}
+    {self._compact_json(rent_data)}
     IMPORTANT: Use the EXACT median rent values from the samples above for 2-bedroom and 3-bedroom houses/apartments. Do not hallucinate or use "general" knowledge about the city. If the data says $600 for a 3-bedroom house, use $600.
 
     ## 6. TRAFFIC & ROAD NOISE DATA (Nearby Arterial & State Highways)
-    {json.dumps(traffic_data, indent=2, default=str)}
+    {self._compact_json(traffic_data)}
 
     ---
     ## 7. RELEVANT NZ BUILDING CODE & DISTRICT PLAN SNIPPETS (RAG)
@@ -554,6 +564,7 @@ class AgentService:
     """.strip()
 
             try:
+                del prop_data, flood_data, seismic_data, crime_data, rent_data, traffic_data
                 import gc
                 response = self._client.models.generate_content(
                     model="gemini-3-flash-preview",
