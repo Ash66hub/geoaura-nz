@@ -37,6 +37,15 @@ class AgentService:
             logger.warning("GEMINI_API_KEY is not set – report synthesis will fail.")
         self._client = genai.Client(api_key=api_key)
 
+        # Shared HTTP client to reduce memory overhead from multiple connection pools
+        self._http_client = httpx.AsyncClient(
+            timeout=20,
+            verify=False,
+            follow_redirects=True,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            headers={"User-Agent": "GeoAura-NZ/1.0"}
+        )
+
         self._linz = LINZService()
         self._flood = FloodService()
         self._police = PoliceService()
@@ -63,17 +72,11 @@ class AgentService:
         plains_url = self._flood.get_query_url_with_bbox(NIWA_FLOOD_PLAINS_URL, bbox, limit=10)
         rivers_url = self._flood.get_query_url_with_bbox(NIWA_RIVER_NETWORK_URL, bbox, limit=10)
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-
         result: dict[str, Any] = {}
 
-        async def fetch_one(key: str, url: str, client: httpx.AsyncClient) -> tuple[str, Any]:
+        async def fetch_one(key: str, url: str) -> tuple[str, Any]:
             try:
-                resp = await asyncio.wait_for(client.get(url), timeout=15)
+                resp = await asyncio.wait_for(self._http_client.get(url), timeout=15)
                 resp.raise_for_status()
                 data = resp.json()
                 if "error" in data:
@@ -81,7 +84,7 @@ class AgentService:
                 features = data.get("features", [])
                 return key, {
                     "feature_count": len(features),
-                    "properties": [f.get("properties", {}) for f in features[:5]],
+                    "properties": [f.get("properties", {}) for f in features[:3]],  # Pruned to 3
                 }
             except Exception as exc:
                 logger.warning(f"Flood data fetch failed for {key}: {exc}")
@@ -99,12 +102,10 @@ class AgentService:
             )
             sources.append(("hamilton_flood_hazard", hamilton_url))
 
-        # use verify=False and follow_redirects=True to match the proxy's robust behavior
-        async with httpx.AsyncClient(timeout=20, headers=headers, verify=False, follow_redirects=True) as client:
-            tasks = [fetch_one(key, url, client) for key, url in sources]
-            pairs = await asyncio.gather(*tasks)
-            for key, val in pairs:
-                result[key] = val
+        tasks = [fetch_one(key, url) for key, url in sources]
+        pairs = await asyncio.gather(*tasks)
+        for key, val in pairs:
+            result[key] = val
 
         return result
 
@@ -117,31 +118,30 @@ class AgentService:
         bbox_regional = _build_bbox(lat, lng, radius=0.2)
 
         result: dict[str, Any] = {}
-        async with httpx.AsyncClient(timeout=20) as client:
-            # Query URLs
-            fault_url = self._seismic.get_fault_lines_query_url_with_bbox(*bbox_faults)
-            quake_local_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox_local, limit=10)
-            quake_regional_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox_regional, limit=20)
+        # Query URLs
+        fault_url = self._seismic.get_fault_lines_query_url_with_bbox(*bbox_faults)
+        quake_local_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox_local, limit=10)
+        quake_regional_url = self._seismic.get_earthquakes_query_url_with_bbox(*bbox_regional, limit=20)
 
-            queries = [
-                ("immediate_fault_lines", fault_url),
-                ("local_soil_activity", quake_local_url),
-                ("regional_seismic_history", quake_regional_url)
-            ]
+        queries = [
+            ("immediate_fault_lines", fault_url),
+            ("local_soil_activity", quake_local_url),
+            ("regional_seismic_history", quake_regional_url)
+        ]
 
-            for key, url in queries:
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    features = data.get("features", [])
-                    result[key] = {
-                        "feature_count": len(features),
-                        "properties": [f.get("properties", {}) for f in features[:10]],
-                    }
-                except Exception as exc:
-                    logger.warning("Seismic fetch failed for %s: %s", key, exc)
-                    result[key] = {"feature_count": 0, "error": str(exc)}
+        for key, url in queries:
+            try:
+                resp = await self._http_client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                features = data.get("features", [])
+                result[key] = {
+                    "feature_count": len(features),
+                    "properties": [f.get("properties", {}) for f in features[:5]], # Pruned to 5
+                }
+            except Exception as exc:
+                logger.warning("Seismic fetch failed for %s: %s", key, exc)
+                result[key] = {"feature_count": 0, "error": str(exc)}
         return result
 
     def _fetch_crime(self, lat: float, lng: float) -> dict[str, Any]:
@@ -359,13 +359,16 @@ class AgentService:
             if not emb:
                 continue
             
-            matches = self._supabase.search_regulatory_documents(emb, doc_type=doc_type, match_count=2)
+            # Reduce match_count to 1 to save memory
+            matches = self._supabase.search_regulatory_documents(emb, doc_type=doc_type, match_count=1)
             for m in matches:
                 content = m.get("content", "")
-                if content not in all_snippets:
+                if content and content not in all_snippets:
                     all_snippets.append(content)
         
-        return "\n\n---\n\n".join(all_snippets)
+        context = "\n\n---\n\n".join(all_snippets)
+        # Cap context size to prevent prompt ballooning
+        return context[:5000]
 
     # ------------------------------------------------------------------ #
     #  Report synthesis                                                    #
@@ -413,6 +416,10 @@ class AgentService:
             rent_data = safe(rent_data)
             traffic_data = safe(traffic_data)
 
+            # --- Pruning Data for Memory Efficiency ---
+            if isinstance(prop_data, dict) and "features" in prop_data:
+                prop_data = prop_data["features"][0].get("properties", {}) if prop_data["features"] else {}
+            
             crime_data = self._fetch_crime(lat, lng)
 
             # RAG: Fetch relevant building code snippets based on detected risks
@@ -546,14 +553,21 @@ class AgentService:
     """.strip()
 
             try:
+                import gc
                 response = self._client.models.generate_content(
                     model="gemini-3-flash-preview",
                     contents=prompt,
                     config=genai_types.GenerateContentConfig(
-                        response_mime_type="application/json",
+                        # response_mime_type="application/json", # Use normal text and json.loads for better error handling
                         temperature=0.2,
                     ),
                 )
+                
+                # Explicitly clear large objects before heavy JSON parsing
+                del prompt
+                del rag_context
+                gc.collect()
+
                 report = json.loads(response.text)
                 
                 # Ensure the generation timestamp is accurate and in UTC
