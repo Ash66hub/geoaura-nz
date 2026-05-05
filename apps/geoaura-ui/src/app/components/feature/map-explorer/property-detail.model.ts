@@ -34,6 +34,7 @@ export function buildPropertyDetailModel(
         },
       ],
       coords: propertyCoords,
+      propertyLoading: true,
     };
   }
 

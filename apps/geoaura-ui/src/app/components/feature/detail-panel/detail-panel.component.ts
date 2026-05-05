@@ -60,6 +60,7 @@ export interface DetailPanelModel {
   rentStatsLoading?: boolean;
   selectedArea?: string | null;
   coords?: { lat: number; lng: number } | null;
+  propertyLoading?: boolean;
 }
 
 @Component({

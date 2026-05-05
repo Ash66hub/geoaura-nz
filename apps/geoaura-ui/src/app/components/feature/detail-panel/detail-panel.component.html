@@ -282,7 +282,8 @@
               <button
                 id="generate-report-btn"
                 class="generate-report-btn"
-                (click)="onGenerateReport()">
+                (click)="onGenerateReport()"
+                [disabled]="model.propertyLoading">
                 <img src="/assets/logo_without_text_small.png" alt="GeoAura Logo" class="btn-logo">
                 Generate Aura Report
               </button>
