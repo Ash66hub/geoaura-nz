@@ -1,12 +1,8 @@
-import csv
-import io
 import json
 import ssl
 import time
 import urllib.parse
 import urllib.request
-import httpx
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,103 +16,36 @@ class PoliceService:
         "https://services2.arcgis.com/vKb0s8tBIA3bdocZ/arcgis/rest/services/"
         "Meshblock_2025/FeatureServer/0/query"
     )
-    REMOTE_CSV_URL = (
-        "https://qzoievmtpylfdvbteruc.supabase.co/storage/v1/object/public/raw-data/"
-        "NZPoliceData/Download%20Table_Full%20Data_data%20Feb2025_to_Jan2026_with_population.csv"
-    )
 
     def __init__(self):
-        nz_police_data_dir = (
-            Path(__file__).resolve().parent.parent.parent.parent
+        # path to apps/geoaura-api/data/police_aggregated.json
+        self.json_path = (
+            Path(__file__).resolve().parent.parent
             / "data"
-            / "raw"
-            / "NZPoliceData"
-        )
-        self.csv_path = (
-            nz_police_data_dir
-            / "Download Table_Full Data_data Feb2025_to_Jan2026_with_population.csv"
+            / "police_aggregated.json"
         )
 
         self._aggregated_cache: dict[str, dict[str, int]] | None = None
         self._population_cache: dict[str, float] | None = None
-        self._cache_time: float | None = None
-
-    def _cache_expired(self) -> bool:
-        if self._cache_time is None:
-            return True
-        return (time.time() - self._cache_time) > self._CACHE_TTL_SECONDS
-
-    def _get_csv_text(self) -> str:
-        """Get CSV content from local file or remote URL."""
-        if self.csv_path.exists():
-            raw = self.csv_path.read_bytes()
-        else:
-            with httpx.Client(timeout=60.0) as client:
-                response = client.get(self.REMOTE_CSV_URL)
-                response.raise_for_status()
-                raw = response.content
-
-        if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
-            return raw.decode("utf-16")
-        return raw.decode("utf-8-sig", errors="replace")
-
-    def _parse_csv_once(self) -> tuple[dict[str, dict[str, int]], dict[str, float]]:
-        """
-        Single-pass CSV parse producing both aggregated crime data and population data.
-        Avoids reading and decoding the 23MB file twice.
-        """
-        aggregated: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        population: dict[str, float] = {}
-
-        text = self._get_csv_text()
-        stream = io.StringIO(text)
-        sample = stream.read(2048)
-        stream.seek(0)
-
-        try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=",\t")
-        except csv.Error:
-            dialect = csv.excel_tab
-
-        reader = csv.DictReader(stream, dialect=dialect)
-        if reader.fieldnames:
-            reader.fieldnames = [f.strip() if f else f for f in reader.fieldnames]
-
-        for row in reader:
-            normalized = {k.strip() if k else k: v for k, v in row.items()}
-
-            meshblock_raw = str(normalized.get("Meshblock", "")).strip()
-            if not meshblock_raw or not meshblock_raw.lstrip("-").isdigit() or int(meshblock_raw) <= 0:
-                continue
-
-            normalized_code = self._normalize_meshblock_code(meshblock_raw)
-
-            # Crime aggregation
-            crime_type = str(normalized.get("ANZSOC Division", "")).strip()
-            try:
-                victimisations = int(str(normalized.get("Victimisations", "0")).strip() or "0")
-            except (ValueError, TypeError):
-                victimisations = 0
-
-            if crime_type and victimisations > 0:
-                aggregated[meshblock_raw][crime_type] += victimisations
-
-            # Population (write once per meshblock; later rows overwrite but value is constant)
-            if normalized_code not in population:
-                pop_val = self._parse_population_value(
-                    str(normalized.get("ELECTORAL_POPULATION_TOTAL", ""))
-                )
-                if pop_val is not None:
-                    population[normalized_code] = pop_val
-
-        aggregated_plain = {mesh: dict(breakdown) for mesh, breakdown in aggregated.items()}
-        return aggregated_plain, population
 
     def _ensure_cache(self) -> None:
-        if not self._cache_expired():
+        if self._aggregated_cache is not None and self._population_cache is not None:
             return
-        self._aggregated_cache, self._population_cache = self._parse_csv_once()
-        self._cache_time = time.time()
+
+        if not self.json_path.exists():
+            # Fallback to empty if json not found (should be committed or fetched)
+            self._aggregated_cache = {}
+            self._population_cache = {}
+            return
+
+        try:
+            data = json.loads(self.json_path.read_bytes())
+            self._aggregated_cache = data.get("crime", {})
+            self._population_cache = data.get("population", {})
+        except Exception as e:
+            print(f"Error loading police_aggregated.json: {e}")
+            self._aggregated_cache = {}
+            self._population_cache = {}
 
     def get_aggregated_data(self) -> dict[str, dict[str, int]]:
         self._ensure_cache()
@@ -125,17 +54,6 @@ class PoliceService:
     def get_population_data(self) -> dict[str, float]:
         self._ensure_cache()
         return self._population_cache  # type: ignore[return-value]
-
-    @staticmethod
-    def _parse_population_value(value: str) -> Optional[float]:
-        text = str(value).strip()
-        if text in {"", "-999"}:
-            return None
-        try:
-            parsed = float(text)
-            return parsed if parsed >= 0 else None
-        except (TypeError, ValueError):
-            return None
 
     @staticmethod
     def _normalize_meshblock_code(code: str) -> str:

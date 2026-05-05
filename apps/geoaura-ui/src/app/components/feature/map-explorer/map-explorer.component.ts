@@ -307,7 +307,7 @@ export class MapExplorerComponent implements OnInit, AfterViewInit, OnDestroy {
             {
               title: 'Incident Density',
               description:
-                'Loads for zoom levels beyond 8. Meshblock-level incident density represented as a choropleth. Click a meshblock to view crime type distribution. The data included is of the period 2025-2026.',
+                'Loads for zoom levels beyond 12. Meshblock-level incident density represented as a choropleth. Click a meshblock to view crime type distribution. The data included is of the period 2025-2026.',
               source: 'NZ Police',
               symbol: 'pie_chart',
               symbolColor: '#ef4444',
@@ -456,6 +456,12 @@ export class MapExplorerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   setPanelInfoMode(mode: any) {
     this.panelInfoMode.set(mode as DetailPanelInfoMode);
+  }
+
+  onPanelClick() {
+    if (window.innerWidth <= 768 && this.isMobileControlsOpen()) {
+      this.isMobileControlsOpen.set(false);
+    }
   }
 
   private isLayerActive(id: string): boolean {
@@ -642,6 +648,14 @@ export class MapExplorerComponent implements OnInit, AfterViewInit, OnDestroy {
         this.zoomLevel.set(Number(map.getZoom().toFixed(1)));
         this.syncPoliceLayerZoomGate();
       });
+    });
+
+    map.on('click', () => {
+      if (window.innerWidth <= 768 && this.isMobileControlsOpen()) {
+        this.ngZone.run(() => {
+          this.isMobileControlsOpen.set(false);
+        });
+      }
     });
 
     map.on('load', () => {

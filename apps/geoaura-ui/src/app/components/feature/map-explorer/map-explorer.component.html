@@ -96,7 +96,7 @@
 }
 
 @if (detailPanelModel()) {
-  <div class="right-detail-panel-overlay" [class.has-selector]="reportService.isSelectorOpen()">
+  <div class="right-detail-panel-overlay" [class.has-selector]="reportService.isSelectorOpen()" (click)="onPanelClick()">
     <app-detail-panel
       [model]="detailPanelModel()"
       [minimized]="isDetailPanelMinimized()"
