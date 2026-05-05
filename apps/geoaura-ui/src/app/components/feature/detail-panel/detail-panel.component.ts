@@ -193,6 +193,7 @@ export class DetailPanelComponent {
   }
 
   onGenerateReport() {
+    if (this.model?.propertyLoading) return;
     this.reportService.isSelectorOpen.set(true);
   }
 
