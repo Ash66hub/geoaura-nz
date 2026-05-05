@@ -9,13 +9,14 @@ This project is built as a Monorepo to ensure seamless integration between spati
 
 Frontend: Angular 21 (Signals, Standalone Components, MapLibre GL JS)
 
-Backend: FastAPI (Python 3.11, LangGraph for Agentic Workflows)
+Backend: FastAPI (Python 3.11)
 
 AI Brain: Gemini 1.5 Flash (via Google AI SDK)
 
 Spatial Data: PostGIS, NIWA (Floods), GNS/GeoNet (Seismic), LINZ (Parcels)
 
 ## Backend Dependencies
+
 The following libraries are required to run the GeoAura API:
 
 ```text
