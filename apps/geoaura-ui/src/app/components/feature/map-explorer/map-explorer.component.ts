@@ -54,7 +54,7 @@ const NZ_BOUNDS: LngLatBoundsLike = [
   [165.0, -48.5],
   [179.5, -33.0],
 ];
-const POLICE_MIN_ZOOM = 8;
+const POLICE_MIN_ZOOM = 12;
 
 @Component({
   selector: 'app-map-explorer',
