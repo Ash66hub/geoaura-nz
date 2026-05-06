@@ -118,9 +118,9 @@ class SupabaseService:
         )
         return bool(response.data)
 
-    def requeue_stale_processing_reports(self, stale_after_seconds: int) -> int:
+    def requeue_stale_processing_reports(self, stale_after_seconds: int) -> List[str]:
         if not self.client:
-            return 0
+            return []
 
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_seconds)
         cutoff_iso = cutoff.isoformat()
@@ -132,7 +132,7 @@ class SupabaseService:
             .lt("updated_at", cutoff_iso)
             .execute()
         )
-        return len(response.data or [])
+        return [item.get("id") for item in (response.data or []) if item.get("id")]
 
     def get_reports_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         if not self.client:

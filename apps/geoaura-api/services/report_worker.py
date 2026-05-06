@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from services.agent_service import AgentService
 from services.supabase_service import SupabaseService
@@ -28,6 +29,14 @@ def _get_requeue_after_seconds() -> int:
         return 900
 
 
+def _get_requeue_interval_seconds() -> int:
+    raw = os.getenv("REPORT_REQUEUE_INTERVAL_SECONDS", "60")
+    try:
+        return max(10, int(raw))
+    except ValueError:
+        return 60
+
+
 async def report_worker_loop() -> None:
     logging.getLogger().setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
@@ -40,10 +49,12 @@ async def report_worker_loop() -> None:
     agent = AgentService()
     poll_seconds = _get_poll_seconds()
     requeue_after = _get_requeue_after_seconds()
+    requeue_interval = _get_requeue_interval_seconds()
+    next_requeue_at = time.monotonic() + requeue_interval
 
     requeued = supabase.requeue_stale_processing_reports(requeue_after)
     if requeued:
-        logger.info("Requeued %s stale processing reports", requeued)
+        logger.info("Requeued %s stale processing reports: %s", len(requeued), ", ".join(requeued))
 
     logger.info("Report worker started. Poll interval=%ss", poll_seconds)
     print(f"Report worker started. Poll interval={poll_seconds}s")
@@ -52,6 +63,13 @@ async def report_worker_loop() -> None:
         try:
             logger.info("Report worker poll")
             print("Report worker poll")
+
+            if time.monotonic() >= next_requeue_at:
+                requeued = supabase.requeue_stale_processing_reports(requeue_after)
+                if requeued:
+                    logger.info("Requeued %s stale processing reports: %s", len(requeued), ", ".join(requeued))
+                next_requeue_at = time.monotonic() + requeue_interval
+
             report = supabase.get_next_queued_report()
             if not report:
                 await asyncio.sleep(poll_seconds)
