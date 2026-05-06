@@ -1,3 +1,4 @@
+import asyncio
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from api.api_v1.api import api_router
+from services.report_worker import report_worker_loop
 
 app = FastAPI(
     title="GeoAura NZ API",
@@ -22,6 +24,12 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+
+
+@app.on_event("startup")
+async def start_report_worker() -> None:
+    if os.getenv("RUN_REPORT_WORKER") == "1":
+        asyncio.create_task(report_worker_loop())
 
 @app.get("/", tags=["General"])
 def root():

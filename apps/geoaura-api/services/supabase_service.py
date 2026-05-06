@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
@@ -52,20 +52,70 @@ class SupabaseService:
             "lat": lat,
             "lng": lng,
             "user_type": user_type,
-            "status": "PENDING"
+            "status": "QUEUED"
         }
         response = self.client.table("reports").insert(data).execute()
         return response.data[0]
 
-    def update_report(self, report_id: str, status: str, result: Dict[str, Any] = None) -> None:
+    def update_report(
+        self,
+        report_id: str,
+        status: str,
+        result: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
         if not self.client:
             return
         
         data = {"status": status, "updated_at": "now()"}
         if result:
             data["result"] = result
+        elif error_message:
+            data["result"] = {"error": error_message}
         
         self.client.table("reports").update(data).eq("id", report_id).execute()
+
+    def get_report_queue_depth(self, statuses: List[str]) -> int:
+        if not self.client:
+            return 0
+
+        response = (
+            self.client.table("reports")
+            .select("id", count="exact")
+            .in_("status", statuses)
+            .execute()
+        )
+        if response.count is not None:
+            return int(response.count)
+        return len(response.data or [])
+
+    def get_next_queued_report(self) -> Dict[str, Any]:
+        if not self.client:
+            return {}
+
+        response = (
+            self.client.table("reports")
+            .select("*")
+            .eq("status", "QUEUED")
+            .order("created_at", desc=False)
+            .limit(1)
+            .execute()
+        )
+        data = response.data or []
+        return data[0] if data else {}
+
+    def claim_report(self, report_id: str) -> bool:
+        if not self.client:
+            return False
+
+        response = (
+            self.client.table("reports")
+            .update({"status": "PROCESSING", "updated_at": "now()"})
+            .eq("id", report_id)
+            .eq("status", "QUEUED")
+            .execute()
+        )
+        return bool(response.data)
 
     def get_reports_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         if not self.client:

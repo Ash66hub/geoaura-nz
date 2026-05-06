@@ -1,7 +1,8 @@
 import logging
+import os
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from services.agent_service import AgentService
@@ -38,8 +39,7 @@ class ReportRequest(BaseModel):
 
 @router.post("/generate")
 async def generate_report(
-    request: ReportRequest, 
-    background_tasks: BackgroundTasks,
+    request: ReportRequest,
     payload: dict = Depends(verify_token)
 ):
     """
@@ -52,7 +52,14 @@ async def generate_report(
             raise HTTPException(status_code=401, detail="User ID not found in token")
 
         supabase = _get_supabase()
-        agent = _get_agent()
+
+        max_queue = int(os.getenv("MAX_REPORT_QUEUE", "5"))
+        queue_depth = supabase.get_report_queue_depth(["QUEUED", "PROCESSING"])
+        if queue_depth >= max_queue:
+            raise HTTPException(
+                status_code=429,
+                detail="Report queue is full. Please retry shortly.",
+            )
         
         # 1. Create a pending report record
         report = supabase.create_report(
@@ -64,19 +71,8 @@ async def generate_report(
         )
         
         report_id = report["id"]
-        
-        # 2. Trigger background processing
-        background_tasks.add_task(
-            agent.generate_report,
-            lat=request.lat,
-            lng=request.lng,
-            address=request.address,
-            user_type=request.user_type,
-            flood_data=request.flood_data,
-            report_id=report_id
-        )
-        
-        return {"id": report_id, "status": "PENDING"}
+
+        return {"id": report_id, "status": "QUEUED"}
     except Exception as exc:
         logger.exception("Report generation trigger failed for %s", request.address)
         raise HTTPException(
@@ -91,6 +87,20 @@ async def list_reports(payload: dict = Depends(verify_token)):
     """
     supabase = _get_supabase()
     return supabase.get_reports_for_user(payload.get("sub"))
+
+
+@router.get("/queue/status")
+async def queue_status(payload: dict = Depends(verify_token)):
+    supabase = _get_supabase()
+    queued = supabase.get_report_queue_depth(["QUEUED"])
+    processing = supabase.get_report_queue_depth(["PROCESSING"])
+
+    return {
+        "queued": queued,
+        "processing": processing,
+        "max_queue": int(os.getenv("MAX_REPORT_QUEUE", "5")),
+        "worker_enabled": os.getenv("RUN_REPORT_WORKER") == "1",
+    }
 
 @router.get("/{report_id}")
 async def get_report(report_id: str, payload: dict = Depends(verify_token)):
