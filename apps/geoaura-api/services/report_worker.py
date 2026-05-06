@@ -29,6 +29,9 @@ def _get_requeue_after_seconds() -> int:
 
 
 async def report_worker_loop() -> None:
+    logging.getLogger().setLevel(logging.INFO)
+    logger.setLevel(logging.INFO)
+
     if not _get_worker_enabled():
         logger.info("Report worker is disabled (RUN_REPORT_WORKER != 1).")
         return
@@ -43,10 +46,12 @@ async def report_worker_loop() -> None:
         logger.info("Requeued %s stale processing reports", requeued)
 
     logger.info("Report worker started. Poll interval=%ss", poll_seconds)
+    print(f"Report worker started. Poll interval={poll_seconds}s")
 
     while True:
         try:
             logger.info("Report worker poll")
+            print("Report worker poll")
             report = supabase.get_next_queued_report()
             if not report:
                 await asyncio.sleep(poll_seconds)
