@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_poll_seconds() -> int:
-    raw = os.getenv("REPORT_WORKER_POLL_SECONDS", "3")
+    raw = os.getenv("REPORT_WORKER_POLL_SECONDS", "5")
     try:
         return max(1, int(raw))
     except ValueError:
-        return 3
+        return 5
 
 
 def _get_worker_enabled() -> bool:
@@ -46,6 +46,7 @@ async def report_worker_loop() -> None:
 
     while True:
         try:
+            logger.info("Report worker poll")
             report = supabase.get_next_queued_report()
             if not report:
                 await asyncio.sleep(poll_seconds)
