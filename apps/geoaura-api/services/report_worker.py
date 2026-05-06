@@ -20,6 +20,14 @@ def _get_worker_enabled() -> bool:
     return os.getenv("RUN_REPORT_WORKER") == "1"
 
 
+def _get_requeue_after_seconds() -> int:
+    raw = os.getenv("REPORT_REQUEUE_AFTER_SECONDS", "900")
+    try:
+        return max(60, int(raw))
+    except ValueError:
+        return 900
+
+
 async def report_worker_loop() -> None:
     if not _get_worker_enabled():
         logger.info("Report worker is disabled (RUN_REPORT_WORKER != 1).")
@@ -28,6 +36,11 @@ async def report_worker_loop() -> None:
     supabase = SupabaseService()
     agent = AgentService()
     poll_seconds = _get_poll_seconds()
+    requeue_after = _get_requeue_after_seconds()
+
+    requeued = supabase.requeue_stale_processing_reports(requeue_after)
+    if requeued:
+        logger.info("Requeued %s stale processing reports", requeued)
 
     logger.info("Report worker started. Poll interval=%ss", poll_seconds)
 

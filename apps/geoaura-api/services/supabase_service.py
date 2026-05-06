@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from supabase import create_client, Client
 
@@ -116,6 +117,22 @@ class SupabaseService:
             .execute()
         )
         return bool(response.data)
+
+    def requeue_stale_processing_reports(self, stale_after_seconds: int) -> int:
+        if not self.client:
+            return 0
+
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_seconds)
+        cutoff_iso = cutoff.isoformat()
+
+        response = (
+            self.client.table("reports")
+            .update({"status": "QUEUED", "updated_at": "now()"})
+            .eq("status", "PROCESSING")
+            .lt("updated_at", cutoff_iso)
+            .execute()
+        )
+        return len(response.data or [])
 
     def get_reports_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         if not self.client:
