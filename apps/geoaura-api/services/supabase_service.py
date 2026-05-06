@@ -67,12 +67,16 @@ class SupabaseService:
     ) -> None:
         if not self.client:
             return
-        
+
         data = {"status": status, "updated_at": "now()"}
         if result:
             data["result"] = result
         elif error_message:
             data["result"] = {"error": error_message}
+
+        if status in {"COMPLETED", "FAILED", "QUEUED"}:
+            data["lock_owner"] = None
+            data["lock_expires_at"] = None
         
         self.client.table("reports").update(data).eq("id", report_id).execute()
 
@@ -93,11 +97,12 @@ class SupabaseService:
     def get_next_queued_report(self) -> Dict[str, Any]:
         if not self.client:
             return {}
-
+        now_iso = datetime.now(timezone.utc).isoformat()
         response = (
             self.client.table("reports")
             .select("*")
             .eq("status", "QUEUED")
+            .or_(f"lock_expires_at.is.null,lock_expires_at.lt.{now_iso}")
             .order("created_at", desc=False)
             .limit(1)
             .execute()
@@ -105,15 +110,25 @@ class SupabaseService:
         data = response.data or []
         return data[0] if data else {}
 
-    def claim_report(self, report_id: str) -> bool:
+    def lock_report(self, report_id: str, lock_owner: str, lock_seconds: int) -> bool:
         if not self.client:
             return False
-
+        now = datetime.now(timezone.utc)
+        lock_expires = now + timedelta(seconds=lock_seconds)
+        now_iso = now.isoformat()
+        lock_expires_iso = lock_expires.isoformat()
         response = (
             self.client.table("reports")
-            .update({"status": "PROCESSING", "updated_at": "now()"})
+            .update(
+                {
+                    "lock_owner": lock_owner,
+                    "lock_expires_at": lock_expires_iso,
+                    "updated_at": "now()",
+                }
+            )
             .eq("id", report_id)
             .eq("status", "QUEUED")
+            .or_(f"lock_expires_at.is.null,lock_expires_at.lt.{now_iso}")
             .execute()
         )
         return bool(response.data)
@@ -127,7 +142,14 @@ class SupabaseService:
 
         response = (
             self.client.table("reports")
-            .update({"status": "QUEUED", "updated_at": "now()"})
+            .update(
+                {
+                    "status": "QUEUED",
+                    "lock_owner": None,
+                    "lock_expires_at": None,
+                    "updated_at": "now()",
+                }
+            )
             .eq("status", "PROCESSING")
             .lt("updated_at", cutoff_iso)
             .execute()
