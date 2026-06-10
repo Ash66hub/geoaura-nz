@@ -11,7 +11,7 @@ Frontend: Angular 21 (Signals, Standalone Components, MapLibre GL JS)
 
 Backend: FastAPI (Python 3.11)
 
-AI Brain: Gemini 1.5 Flash (via Google AI SDK)
+AI Brain: Gemini 3 Flash preview (via Google AI SDK)
 
 Spatial Data: PostGIS, NIWA (Floods), GNS/GeoNet (Seismic), LINZ (Parcels)
 
