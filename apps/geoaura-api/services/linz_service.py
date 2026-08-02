@@ -635,6 +635,123 @@ class LINZService:
 
         return None
 
+    @staticmethod
+    def _extract_address_from_arcgis_feature(feat: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        props = feat.get("attributes", {})
+        full_addr = props.get("full_address")
+        if not full_addr:
+            num = props.get("full_address_number") or ""
+            road = props.get("full_road_name") or ""
+            suburb = props.get("suburb_locality") or ""
+            town = props.get("town_city") or ""
+            parts = [p for p in [f"{num} {road}".strip(), suburb, town] if p]
+            full_addr = ", ".join(parts) if parts else None
+        if not full_addr:
+            return None
+        return {
+            "full_address": full_addr,
+            "territorial_authority": props.get("territorial_authority") or None,
+        }
+
+    @staticmethod
+    def _ring_contains_point_2d(ring: list, point: tuple) -> bool:
+        x, y = point
+        inside = False
+        j = len(ring) - 1
+        for i in range(len(ring)):
+            xi, yi = float(ring[i][0]), float(ring[i][1])
+            xj, yj = float(ring[j][0]), float(ring[j][1])
+            if ((yi > y) != (yj > y)) and (
+                x < ((xj - xi) * (y - yi)) / ((yj - yi) if (yj - yi) != 0 else 1e-15) + xi
+            ):
+                inside = not inside
+            j = i
+        return inside
+
+    @classmethod
+    def _parcel_contains_point(cls, geometry: Dict[str, Any], lng: float, lat: float) -> bool:
+        """Return True if the GeoJSON geometry contains the given (lng, lat) point."""
+        gtype = geometry.get("type")
+        coords = geometry.get("coordinates")
+        point = (lng, lat)
+
+        def polygon_contains(rings: list) -> bool:
+            if not rings:
+                return False
+            if not cls._ring_contains_point_2d(rings[0], point):
+                return False
+            for hole in rings[1:]:
+                if cls._ring_contains_point_2d(hole, point):
+                    return False
+            return True
+
+        if gtype == "Polygon":
+            return polygon_contains(coords or [])
+        if gtype == "MultiPolygon":
+            return any(polygon_contains(poly) for poly in (coords or []))
+        return False
+
+    async def _get_address_within_parcel(
+        self,
+        parcel_geometry: Dict[str, Any],
+        lat: float,
+        lng: float,
+        client: httpx.AsyncClient,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch address candidates from the ArcGIS LINZ Addresses FeatureServer near the
+        click point with outSR=4326 to guarantee WGS84 coordinates, then filter in Python
+        using the parcel polygon. This ensures only an address actually inside the selected
+        parcel is returned.
+        """
+        arcgis_url = (
+            "https://services.arcgis.com/xdsHIIxuCWByZiCB/arcgis/rest/services/"
+            "LINZ_NZ_Addresses/FeatureServer/0/query"
+        )
+        params = {
+            "where": "1=1",
+            "geometry": f"{lng},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "outSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "full_address,territorial_authority,full_address_number,full_road_name,suburb_locality,town_city",
+            "returnGeometry": "true",
+            "f": "json",
+            "distance": "300",
+            "units": "esriSRUnit_Meter",
+            "resultRecordCount": "25",
+        }
+        try:
+            res = await client.get(arcgis_url, params=params, timeout=8.0)
+            res.raise_for_status()
+            data = res.json()
+            features = data.get("features", [])
+
+            logger.warning(f"[ADDR DEBUG] ArcGIS addr candidates count={len(features)}")
+            if not features:
+                return None
+
+            for feat in features:
+                geom = feat.get("geometry") or {}
+                fx = geom.get("x")
+                fy = geom.get("y")
+                props = feat.get("attributes", {})
+                logger.warning(f"[ADDR DEBUG] candidate ({fx},{fy}) addr={props.get('full_address')}")
+                if fx is None or fy is None:
+                    continue
+                inside = self._parcel_contains_point(parcel_geometry, float(fx), float(fy))
+                logger.warning(f"[ADDR DEBUG] inside_parcel={inside}")
+                if inside:
+                    result = self._extract_address_from_arcgis_feature(feat)
+                    if result:
+                        return result
+
+            return None
+        except Exception as e:
+            logger.warning(f"[ADDR DEBUG] Parcel-scoped address lookup EXCEPTION: {e}")
+        return None
+
     async def get_address_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         """
         Query address by coordinates using ArcGIS LINZ Addresses FeatureServer,
@@ -645,7 +762,6 @@ class LINZService:
             "LINZ_NZ_Addresses/FeatureServer/0/query"
         )
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # 1. Try ArcGIS LINZ Addresses FeatureServer with progressive distances
             for dist in [30, 100, 300, 600]:
                 try:
                     params = {
@@ -683,25 +799,12 @@ class LINZService:
                             best_feat = f
 
                     if best_feat:
-                        props = best_feat.get("attributes", {})
-                        full_addr = props.get("full_address")
-                        if not full_addr:
-                            num = props.get("full_address_number") or ""
-                            road = props.get("full_road_name") or ""
-                            suburb = props.get("suburb_locality") or ""
-                            town = props.get("town_city") or ""
-                            parts = [p for p in [f"{num} {road}".strip(), suburb, town] if p]
-                            full_addr = ", ".join(parts) if parts else None
-
-                        if full_addr:
-                            return {
-                                "full_address": full_addr,
-                                "territorial_authority": props.get("territorial_authority") or None,
-                            }
+                        result = self._extract_address_from_arcgis_feature(best_feat)
+                        if result:
+                            return result
                 except Exception as e:
                     logger.warning(f"ArcGIS address lookup error at dist {dist}m: {e}")
 
-            # 2. Fallback to Photon reverse geocoder
             try:
                 photon_url = f"https://photon.komoot.io/reverse?lat={lat}&lon={lng}"
                 res = await client.get(photon_url, headers={"User-Agent": "GeoAuraNZ/1.0"})
@@ -801,7 +904,6 @@ class LINZService:
                 self._query_layer(LINZLayer.PROPERTY_TITLES, lat, lng, client, radius="200"),
                 self._query_layer(LINZLayer.PRIMARY_PARCELS_CURRENT, lat, lng, client, radius="200"),
                 self._query_layer(LINZLayer.PRIMARY_PARCELS, lat, lng, client, radius="200"),
-                self.get_address_by_coords(lat, lng),
                 self._query_layer(LINZLayer.TERRITORIAL_AUTHORITIES, lat, lng, client, radius="500"),
                 self._query_layer(LINZLayer.DISTRICT_VALUATION_ROLL, lat, lng, client, radius="300"),
                 self._query_layer(LINZLayer.BUILDING_DETAILS, lat, lng, client, radius="50"),
@@ -811,19 +913,43 @@ class LINZService:
             )
 
             res = [r if not isinstance(r, Exception) else None for r in results]
-            title_p, parcel_current_p, parcel_legacy_p, address_p, council_p, dvr_p, details_p, outlines_p, bridge_p = res
+            title_p, parcel_current_p, parcel_legacy_p, council_p, dvr_p, details_p, outlines_p, bridge_p = res
 
             if not any(res):
                 return None
 
             title_p = title_p or {}
             parcel_p = (parcel_current_p or parcel_legacy_p or {})
-            address_p = address_p or {}
             council_p = council_p or {}
             dvr_p = dvr_p or {}
             details_p = details_p or {}
             outlines_p = outlines_p or {}
             bridge_p = bridge_p or {}
+
+            # Resolve parcel geometry first so we can constrain the address lookup to
+            # addresses that fall within the actual parcel polygon. This prevents the
+            # common case where the nearest address point belongs to a neighbouring property.
+            parcel_feature = await self.get_parcel_geometry_by_coords(lat, lng)
+            parcel_geometry = (
+                parcel_feature.get("geometry")
+                if isinstance(parcel_feature, dict)
+                else None
+            )
+            logger.warning(f"[ADDR DEBUG] parcel_geometry type={parcel_geometry.get('type') if parcel_geometry else None}")
+
+            address_p: Dict[str, Any] = {}
+            if parcel_geometry and parcel_geometry.get("type") in ("Polygon", "MultiPolygon"):
+                parcel_address = await self._get_address_within_parcel(parcel_geometry, lat, lng, client)
+                logger.warning(f"[ADDR DEBUG] parcel_address={parcel_address}")
+                if parcel_address:
+                    address_p = parcel_address
+                else:
+                    fallback_address = await self.get_address_by_coords(lat, lng)
+                    logger.warning(f"[ADDR DEBUG] fallback_address={fallback_address}")
+                    address_p = fallback_address or {}
+            else:
+                fallback_address = await self.get_address_by_coords(lat, lng)
+                address_p = fallback_address or {}
 
             # LINZ TA layer fields are not always aligned with the API's name/id shape.
             # Fall back to ArcGIS TA lookup to keep council fields populated in summary responses.
@@ -846,9 +972,8 @@ class LINZService:
 
             parcel_area = title_p.get("title_area") or parcel_p.get("shape_area")
             if not self._has_valid_area_value(parcel_area):
-                parcel_feature = await self.get_parcel_geometry_by_coords(lat, lng)
                 approx_area = self._estimate_polygon_area_square_meters(
-                    parcel_feature.get("geometry") if isinstance(parcel_feature, dict) else None
+                    parcel_geometry
                 )
                 if approx_area is not None:
                     parcel_area = f"~{int(round(approx_area))} m2"
