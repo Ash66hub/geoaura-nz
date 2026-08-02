@@ -41,7 +41,7 @@ export function buildPropertyDetailModel(
   if (summary) {
     const propertyType = derivePropertyType(summary);
     const address = summary.address?.full_address ?? 'Unknown';
-    const ta = summary.address?.territorial_authority ?? 'Unknown';
+    const ta = summary.address?.territorial_authority ?? summary.location?.council ?? 'Unknown';
     const titleNo = summary.title?.title_no ?? 'Unknown';
     const landDistrict = summary.title?.land_district ?? 'Unknown';
     const titleType = summary.title?.type ?? 'Unknown';

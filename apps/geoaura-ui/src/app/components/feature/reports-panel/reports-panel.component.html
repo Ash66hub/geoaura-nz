@@ -70,3 +70,23 @@
     </div>
   </div>
 </div>
+
+@if (deleteTarget(); as target) {
+  <div class="confirm-overlay" (click)="cancelDelete()">
+    <div class="confirm-modal" (click)="$event.stopPropagation()" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="confirm-icon-wrap">
+        <span class="material-symbols-outlined">delete_forever</span>
+      </div>
+      <h3 id="confirm-title">Delete Report</h3>
+      <p class="confirm-message">Are you sure you want to delete the report for <strong>{{ target.address }}</strong>?</p>
+      <p class="confirm-hint">This action cannot be undone.</p>
+      <div class="confirm-actions">
+        <button class="confirm-cancel-btn" (click)="cancelDelete()">Cancel</button>
+        <button class="confirm-delete-btn" (click)="confirmDelete()">
+          <span class="material-symbols-outlined">delete</span>
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+}

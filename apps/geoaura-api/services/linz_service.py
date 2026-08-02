@@ -636,10 +636,95 @@ class LINZService:
         return None
 
     async def get_address_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
-        if not self.api_key:
-            raise ValueError("LINZ_API_KEY is missing")
-        async with httpx.AsyncClient() as client:
-            return await self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="100")
+        """
+        Query address by coordinates using ArcGIS LINZ Addresses FeatureServer,
+        with fallbacks to Photon reverse geocoding.
+        """
+        arcgis_url = (
+            "https://services.arcgis.com/xdsHIIxuCWByZiCB/arcgis/rest/services/"
+            "LINZ_NZ_Addresses/FeatureServer/0/query"
+        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # 1. Try ArcGIS LINZ Addresses FeatureServer with progressive distances
+            for dist in [30, 100, 300, 600]:
+                try:
+                    params = {
+                        "where": "1=1",
+                        "geometry": f"{lng},{lat}",
+                        "geometryType": "esriGeometryPoint",
+                        "inSR": "4326",
+                        "spatialRel": "esriSpatialRelIntersects",
+                        "outFields": "full_address,territorial_authority,full_address_number,full_road_name,suburb_locality,town_city",
+                        "returnGeometry": "true",
+                        "f": "json",
+                        "distance": str(dist),
+                        "units": "esriSRUnit_Meter",
+                        "resultRecordCount": "10",
+                    }
+                    res = await client.get(arcgis_url, params=params)
+                    res.raise_for_status()
+                    data = res.json()
+                    features = data.get("features", [])
+                    if not features:
+                        continue
+
+                    best_feat = None
+                    min_dist_sq = float("inf")
+                    for f in features:
+                        geom = f.get("geometry") or {}
+                        fx = geom.get("x")
+                        fy = geom.get("y")
+                        if fx is not None and fy is not None:
+                            d_sq = (fx - lng) ** 2 + (fy - lat) ** 2
+                            if d_sq < min_dist_sq:
+                                min_dist_sq = d_sq
+                                best_feat = f
+                        elif best_feat is None:
+                            best_feat = f
+
+                    if best_feat:
+                        props = best_feat.get("attributes", {})
+                        full_addr = props.get("full_address")
+                        if not full_addr:
+                            num = props.get("full_address_number") or ""
+                            road = props.get("full_road_name") or ""
+                            suburb = props.get("suburb_locality") or ""
+                            town = props.get("town_city") or ""
+                            parts = [p for p in [f"{num} {road}".strip(), suburb, town] if p]
+                            full_addr = ", ".join(parts) if parts else None
+
+                        if full_addr:
+                            return {
+                                "full_address": full_addr,
+                                "territorial_authority": props.get("territorial_authority") or None,
+                            }
+                except Exception as e:
+                    logger.warning(f"ArcGIS address lookup error at dist {dist}m: {e}")
+
+            # 2. Fallback to Photon reverse geocoder
+            try:
+                photon_url = f"https://photon.komoot.io/reverse?lat={lat}&lon={lng}"
+                res = await client.get(photon_url, headers={"User-Agent": "GeoAuraNZ/1.0"})
+                if res.status_code == 200:
+                    data = res.json()
+                    features = data.get("features", [])
+                    if features:
+                        props = features[0].get("properties", {})
+                        housenumber = props.get("housenumber") or ""
+                        street = props.get("street") or ""
+                        suburb = props.get("suburb") or props.get("district") or ""
+                        city = props.get("city") or props.get("county") or ""
+                        addr_parts = [p for p in [f"{housenumber} {street}".strip(), suburb, city] if p]
+                        full_address = ", ".join(addr_parts) if addr_parts else None
+                        if full_address:
+                            return {
+                                "full_address": full_address,
+                                "territorial_authority": city or suburb or None,
+                            }
+            except Exception as e:
+                logger.warning(f"Photon reverse geocode fallback error: {e}")
+
+        return None
 
     async def get_building_by_coords(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
         if not self.api_key:
@@ -684,7 +769,7 @@ class LINZService:
 
             # Fallback to LINZ addresses territorial_authority for edge cases.
             if self.api_key:
-                address_data = await self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="500")
+                address_data = await self.get_address_by_coords(lat, lng)
                 council_name = (address_data or {}).get("territorial_authority")
                 if council_name:
                     return {
@@ -716,7 +801,7 @@ class LINZService:
                 self._query_layer(LINZLayer.PROPERTY_TITLES, lat, lng, client, radius="200"),
                 self._query_layer(LINZLayer.PRIMARY_PARCELS_CURRENT, lat, lng, client, radius="200"),
                 self._query_layer(LINZLayer.PRIMARY_PARCELS, lat, lng, client, radius="200"),
-                self._query_layer(LINZLayer.ADDRESSES, lat, lng, client, radius="100"),
+                self.get_address_by_coords(lat, lng),
                 self._query_layer(LINZLayer.TERRITORIAL_AUTHORITIES, lat, lng, client, radius="500"),
                 self._query_layer(LINZLayer.DISTRICT_VALUATION_ROLL, lat, lng, client, radius="300"),
                 self._query_layer(LINZLayer.BUILDING_DETAILS, lat, lng, client, radius="50"),
@@ -816,7 +901,7 @@ class LINZService:
                 },
                 "address": {
                     "full_address": address_p.get("full_address"),
-                    "territorial_authority": address_p.get("territorial_authority"),
+                    "territorial_authority": address_p.get("territorial_authority") or council_p.get("name") or council_p.get("council"),
                 },
                 "location": {
                     "council": council_p.get("name") or council_p.get("council"),

@@ -33,7 +33,7 @@ export interface ReportHistoryItem {
   address: string;
   lat: number;
   lng: number;
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   user_type: string;
   result: PropertyReport | null;
   created_at: string;
@@ -55,7 +55,7 @@ export class ReportService {
   isReportsPanelOpen = signal<boolean>(false);
 
   isAnyReportProcessing = computed(() => 
-    this.isLoading() || this.reports().some(r => r.status === 'PENDING' || r.status === 'PROCESSING')
+    this.isLoading() || this.reports().some(r => r.status === 'QUEUED' || r.status === 'PROCESSING')
   );
 
   generateReport(lat: number, lng: number, address: string, userType: 'buyer' | 'renter' = 'buyer', floodData?: Record<string, unknown> | null): Observable<any> {
@@ -101,7 +101,7 @@ export class ReportService {
 
   pollReports() {
     // Poll if there are any pending/processing reports
-    const hasPending = this.reports().some(r => r.status === 'PENDING' || r.status === 'PROCESSING');
+    const hasPending = this.reports().some(r => r.status === 'QUEUED' || r.status === 'PROCESSING');
     if (hasPending) {
       this.fetchReports();
     }

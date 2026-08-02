@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReportService, ReportHistoryItem } from '../../../services/report.service';
 import { AuthService } from '../../../services/auth.service';
@@ -8,12 +8,14 @@ import { AuthService } from '../../../services/auth.service';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './reports-panel.component.html',
-  styleUrl: './reports-panel.component.scss'
+  styleUrl: './reports-panel.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ReportsPanelComponent implements OnInit, OnDestroy {
   public reportService = inject(ReportService);
   protected authService = inject(AuthService);
-  
+
+  deleteTarget = signal<ReportHistoryItem | null>(null);
   private pollInterval: any;
 
   ngOnInit() {
@@ -52,9 +54,19 @@ export class ReportsPanelComponent implements OnInit, OnDestroy {
 
   onDeleteReport(event: Event, report: ReportHistoryItem) {
     event.stopPropagation();
-    if (confirm(`Are you sure you want to delete the report for ${report.address}?`)) {
+    this.deleteTarget.set(report);
+  }
+
+  confirmDelete() {
+    const report = this.deleteTarget();
+    if (report) {
       this.reportService.deleteReport(report.id).subscribe();
     }
+    this.deleteTarget.set(null);
+  }
+
+  cancelDelete() {
+    this.deleteTarget.set(null);
   }
 
   formatDate(isoString: string): string {
@@ -76,7 +88,7 @@ export class ReportsPanelComponent implements OnInit, OnDestroy {
 
   getStatusIcon(status: string): string {
     switch (status) {
-      case 'PENDING': return 'schedule';
+      case 'QUEUED': return 'schedule';
       case 'PROCESSING': return 'sync';
       case 'COMPLETED': return 'check_circle';
       case 'FAILED': return 'error';
